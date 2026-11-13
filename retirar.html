@@ -73,7 +73,7 @@ iniciar(async () => {
   $("#rLib").value = BASE.usuario.nome;
   ass = campoAssinatura($("#rAss"), "Assinatura de quem retirou");
   assMan = campoAssinatura($("#rAssMan"), "Assinatura do responsável");
-  fotoBaixa = campoArquivo($("#rFoto"), { texto: "Tirar foto do bem" });
+  fotoBaixa = campoArquivo($("#rFoto"), { texto: "Tirar foto do bem", captura: true });
   $$("[data-tipo]").forEach((o) => o.onclick = () => trocar(o.dataset.tipo));
   await campoBem($("#rBem"), (b) => { BEM = b; opcoesDe(); }, { bemId: param("bem") });
   trocar(TIPO);

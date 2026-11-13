@@ -80,7 +80,7 @@ async function carregar() {
           <div><span>Fornecedor</span>${esc(e.fornecedor || "—")}</div>
           <div><span>Valor unitário</span>${moeda(e.valor_unitario) || "—"}</div>
           <div><span>Valor total</span>${e.valor_unitario !== null ? moeda(e.valor_unitario * e.quantidade) : "—"}</div>
-          <div><span>Nota fiscal</span>${e.nf_url ? `<a href="${esc(e.nf_url)}" target="_blank" rel="noopener">Abrir nota</a>` : `<span class="pill pendente" style="display:inline-block">sem nota fiscal</span>`}</div>
+          <div><span>Nota fiscal</span>${e.nf_numero ? "nº " + esc(e.nf_numero) + " · " : ""}${e.nf_url ? `<a href="${esc(e.nf_url)}" target="_blank" rel="noopener">Abrir nota</a>` : `<span class="pill pendente" style="display:inline-block">sem nota fiscal</span>`}</div>
           <div><span>Garantia até</span>${e.garantia_ate ? fmtData(e.garantia_ate) + (e.garantia_ate < BASE.hoje ? " (vencida)" : "") : "—"}</div>
           <div><span>Prazo de vida</span>${e.vida_util_anos ? `${String(e.vida_util_anos).replace(".", ",")} ano(s) · até ${fmtData(vidaAte(e))}` : "—"}</div>
         </div>
@@ -136,7 +136,8 @@ function editarEntrada(e) {
     <div class="grade2">
       <div><label>Data de aquisição</label><input id="aData" type="date" value="${e.data_aquisicao}" max="${BASE.hoje}"></div>
       <div><label>Valor unitário (R$)</label><input id="aValor" type="text" inputmode="decimal" value="${e.valor_unitario !== null ? String(e.valor_unitario).replace(".", ",") : ""}"></div>
-      <div class="cheio"><label>Fornecedor</label><input id="aForn" type="text" value="${esc(e.fornecedor || "")}"></div>
+      <div><label>Fornecedor</label><input id="aForn" type="text" value="${esc(e.fornecedor || "")}"></div>
+      <div><label>Nº da nota fiscal</label><input id="aNfNum" type="text" value="${esc(e.nf_numero || "")}"></div>
       <div><label>Garantia até</label><input id="aGar" type="date" value="${e.garantia_ate || ""}"></div>
       <div><label>Prazo de vida (anos)</label><input id="aVida" type="text" inputmode="decimal" value="${e.vida_util_anos !== null ? String(e.vida_util_anos).replace(".", ",") : ""}"></div>
     </div>
@@ -148,7 +149,7 @@ function editarEntrada(e) {
     $("#aOk", d).onclick = async () => {
       $("#aOk", d).disabled = true;
       try {
-        const r = await api(`/entradas/${e.id}/editar`, { body: { data_aquisicao: $("#aData", d).value, valor_unitario: $("#aValor", d).value, fornecedor: $("#aForn", d).value, garantia_ate: $("#aGar", d).value, vida_util_anos: $("#aVida", d).value, obs: $("#aObs", d).value, nf: nf.valor() } });
+        const r = await api(`/entradas/${e.id}/editar`, { body: { data_aquisicao: $("#aData", d).value, valor_unitario: $("#aValor", d).value, fornecedor: $("#aForn", d).value, nf_numero: $("#aNfNum", d).value, garantia_ate: $("#aGar", d).value, vida_util_anos: $("#aVida", d).value, obs: $("#aObs", d).value, nf: nf.valor() } });
         toast(r.nada ? "Nada mudou." : "Aquisição atualizada."); d.close(); carregar();
       } catch (er) { $("#aErro", d).textContent = er.message; $("#aOk", d).disabled = false; }
     };

@@ -303,11 +303,12 @@ async function comprimirImagem(arquivo, max = 1600, qualidade = 0.8) {
   c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
   return c.toDataURL("image/jpeg", qualidade);
 }
-// <label class="arquivo"> com input escondido. tipo: "foto" ou "nf" (PDF ou foto). Devolve { valor(), limpar() }
-function campoArquivo(container, { tipo = "foto", texto = "Tirar ou escolher foto", captura = true } = {}) {
+// <label class="arquivo"> com input escondido. tipo: "foto" ou "nf" (PDF ou foto). Devolve { valor(), limpar(), existente() }
+// captura: true abre só a câmera (usado na baixa); sem ela o celular oferece câmera ou galeria.
+function campoArquivo(container, { tipo = "foto", texto = "Tirar ou escolher foto", captura = false } = {}) {
   let dado = null;
   const aceita = tipo === "nf" ? "application/pdf,image/*" : "image/*";
-  container.innerHTML = `<label class="arquivo"><input type="file" accept="${aceita}" ${tipo === "foto" && captura ? 'capture="environment"' : ""}><span class="txt">📎 ${esc(texto)}</span><span class="nome"></span></label><div class="prev"></div>`;
+  container.innerHTML = `<label class="arquivo"><input type="file" accept="${aceita}" ${tipo === "foto" && captura ? 'capture="environment"' : ""}><span class="txt">📎 ${esc(texto)}</span><span class="nome"></span></label><div class="prev"></div><div class="dica ja" hidden></div>`;
   const inp = $("input", container), lab = $(".arquivo", container), nome = $(".nome", container), prev = $(".prev", container);
   inp.onchange = async () => {
     const f = inp.files[0]; dado = null; lab.classList.remove("ok"); nome.textContent = ""; prev.innerHTML = "";
@@ -323,7 +324,13 @@ function campoArquivo(container, { tipo = "foto", texto = "Tirar ou escolher fot
       lab.classList.add("ok"); nome.textContent = f.name;
     } catch (e) { toast(e.message, true); inp.value = ""; }
   };
-  return { valor: () => dado, limpar: () => { dado = null; inp.value = ""; lab.classList.remove("ok"); nome.textContent = ""; prev.innerHTML = ""; } };
+  const ja = $(".ja", container);
+  return {
+    valor: () => dado,
+    limpar: () => { dado = null; inp.value = ""; lab.classList.remove("ok"); nome.textContent = ""; prev.innerHTML = ""; ja.hidden = true; ja.innerHTML = ""; },
+    // arquivo já guardado (ex.: no rascunho): mostra o link; escolher outro substitui
+    existente: (url, rotulo = "Já anexado") => { ja.hidden = !url; ja.innerHTML = url ? `✓ ${esc(rotulo)} — <a href="${esc(url)}" target="_blank" rel="noopener">ver</a>. Escolha outro só se quiser trocar.` : ""; },
+  };
 }
 
 // ------------------------------------------------------------ assinatura ---
@@ -364,8 +371,8 @@ function descreverMov(m) {
   const q = num(Math.abs(m.quantidade || 0));
   const est = (e) => (e ? (ESTADO_NOME[e] || e).toLowerCase() : "");
   switch (m.tipo) {
-    case "cadastro": return `<b>Cadastro</b>: +${q} ${est(m.estado_destino)} em ${esc(nomeLocal(m.local_destino_id))}${d.fornecedor ? " · " + esc(d.fornecedor) : ""}${d.sem_nf ? " · sem nota fiscal" : ""}`;
-    case "entrada": return `<b>Incluir</b> (aquisição nº ${d.entrada}): +${q} ${est(m.estado_destino)} em ${esc(nomeLocal(m.local_destino_id))}${d.fornecedor ? " · " + esc(d.fornecedor) : ""}${d.sem_nf ? " · sem nota fiscal" : ""}`;
+    case "cadastro": return `<b>Cadastro</b>: +${q} ${est(m.estado_destino)} em ${esc(nomeLocal(m.local_destino_id))}${d.fornecedor ? " · " + esc(d.fornecedor) : ""}${d.nf_numero ? " · NF " + esc(d.nf_numero) : ""}${d.sem_nf ? " · sem nota fiscal" : ""}`;
+    case "entrada": return `<b>Incluir</b> (aquisição nº ${d.entrada}): +${q} ${est(m.estado_destino)} em ${esc(nomeLocal(m.local_destino_id))}${d.fornecedor ? " · " + esc(d.fornecedor) : ""}${d.nf_numero ? " · NF " + esc(d.nf_numero) : ""}${d.sem_nf ? " · sem nota fiscal" : ""}`;
     case "emprestimo": case "manutencao": return `<b>${TIPO_SAIDA[m.tipo]} nº ${d.saida}</b>: −${q} ${est(m.estado_origem)} de ${esc(nomeLocal(m.local_origem_id))} para ${esc(d.para || "—")} · prazo ${fmtData(d.prazo_retorno)} · liberado por ${esc(d.liberado_por || "")}`;
     case "devolucao": return `<b>Devolução</b> do ${TIPO_SAIDA[d.tipo_saida] ? TIPO_SAIDA[d.tipo_saida].toLowerCase() : ""} nº ${d.saida}: +${q} em ${esc(nomeLocal(m.local_destino_id))} (${ESTADOS.filter((k) => d[k]).map((k) => d[k] + " " + est(k)).join(", ")})${d.em_aberto ? ` · ${d.em_aberto} ainda em aberto` : ""}`;
     case "transferencia": return `<b>Transferência</b>: ${q} ${est(m.estado_origem)} de ${esc(nomeLocal(m.local_origem_id))} → ${esc(nomeLocal(m.local_destino_id))}${d.levado_por ? " · levado por " + esc(d.levado_por) : ""}${d.obs ? " · " + esc(d.obs) : ""}`;
@@ -379,7 +386,7 @@ function descreverMov(m) {
     }
     case "localizado": return `<b>Localizado</b>: ${q} ${est(m.estado_destino)} — faltava em ${esc(nomeLocal(m.local_origem_id))}, achado em ${esc(nomeLocal(m.local_destino_id))}${d.obs ? " · " + esc(d.obs) : ""}`;
     case "edicao": {
-      const nomes = { descricao: "descrição", codigo_sistema: "cód. sistema", codigo_patrimonio: "patrimônio", categoria_id: "categoria", foto_path: "foto", data_aquisicao: "data de aquisição", fornecedor: "fornecedor", valor_unitario: "valor unitário", garantia_ate: "garantia", vida_util_anos: "prazo de vida", obs: "obs.", nf_path: "nota fiscal", sem_nf: "sem nota" };
+      const nomes = { descricao: "descrição", codigo_sistema: "cód. sistema", codigo_patrimonio: "patrimônio", categoria_id: "categoria", foto_path: "foto", data_aquisicao: "data de aquisição", nf_numero: "nº da nota", fornecedor: "fornecedor", valor_unitario: "valor unitário", garantia_ate: "garantia", vida_util_anos: "prazo de vida", obs: "obs.", nf_path: "nota fiscal", sem_nf: "sem nota" };
       const campos = Object.entries(d.campos || {}).map(([k, [a, b]]) => `${nomes[k] || k}: ${esc(k === "categoria_id" ? categoriaNome(a) : a ?? "—")} → ${esc(k === "categoria_id" ? categoriaNome(b) : b ?? "—")}`).join("; ");
       return `<b>Edição ${d.o_que === "aquisicao" ? "da aquisição nº " + d.entrada : "dos dados"}</b>: ${campos}`;
     }

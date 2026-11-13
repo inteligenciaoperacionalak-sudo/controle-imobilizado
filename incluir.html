@@ -15,11 +15,15 @@
 <script src="comum.js"></script>
 <script>
 let MODO = param("bem") ? "existente" : "novo", BEM = null, cat = null, foto = null, nf = null, local = null;
+let RASC = null;        // inclusão em aberto que está sendo continuada
+let RASCUNHOS = [];
 
 iniciar(async () => {
   await carregarBens();
   $("main").innerHTML = `
     <div class="titulo"><div><h2>Incluir</h2><p>Bem novo vai para o cadastro. Mais unidades de um bem que já existe entram como uma nova aquisição, separada das anteriores.</p></div></div>
+    <div id="abertas"></div>
+    <div class="nota" id="continuando" hidden></div>
     <form id="f" novalidate>
       <div class="opcoes" role="radiogroup" aria-label="O que vai incluir">
         <label class="opcao" data-modo="novo"><input type="radio" name="modo" value="novo">Bem novo</label>
@@ -27,18 +31,18 @@ iniciar(async () => {
       </div>
 
       <div id="blNovo">
-        <div class="form-tit" style="margin-top:22px;padding-top:14px;border-top:1px solid var(--linha)">Cadastro do bem</div>
+        <div class="form-tit">Cadastro do bem</div>
         <label for="iDesc">Descrição <span class="obrig">*</span></label><input id="iDesc" type="text" placeholder="Ex.: Cadeira plástica branca com braço">
         <div class="grade2">
           <div><label for="iSis">Cód. do produto no sistema <span class="obrig">*</span></label><input id="iSis" type="text"></div>
           <div><label for="iPat">Cód. de patrimônio <span class="obrig">*</span></label><input id="iPat" type="text" autocapitalize="characters"></div>
         </div>
         <label>Categoria <span class="obrig">*</span> <span class="opc">— o + cria uma nova</span></label><div id="iCat"></div>
-        <label>Foto do bem <span class="opc">(opcional)</span></label><div id="iFoto"></div>
+        <label>Foto do bem <span class="opc">(opcional — câmera ou galeria)</span></label><div id="iFoto"></div>
       </div>
 
       <div id="blExistente">
-        <div class="form-tit" style="margin-top:22px;padding-top:14px;border-top:1px solid var(--linha)">Qual bem</div>
+        <div class="form-tit">Qual bem</div>
         <div id="iBem" style="margin-top:8px"></div>
         <p class="dica" id="iBemInfo"></p>
       </div>
@@ -57,6 +61,7 @@ iniciar(async () => {
         <div class="grade2">
           <div><label for="iForn">Fornecedor <span class="obrig">*</span></label><input id="iForn" type="text"></div>
           <div><label for="iValor">Valor unitário (R$) <span class="obrig">*</span></label><input id="iValor" type="text" inputmode="decimal" placeholder="0,00"></div>
+          <div class="cheio"><label for="iNfNum">Nº da nota fiscal <span class="opc">(opcional)</span></label><input id="iNfNum" type="text" inputmode="numeric" placeholder="Ex.: 001234"></div>
         </div>
         <label>Nota fiscal <span class="obrig">*</span> <span class="opc">(PDF ou foto)</span></label><div id="iNf"></div>
       </div>
@@ -74,47 +79,138 @@ iniciar(async () => {
       <label for="iObs">Observação <span class="opc">(opcional)</span></label><textarea id="iObs" rows="2"></textarea>
       <div class="erro" id="iErro"></div>
       <button class="bt-mar bt-grande" type="submit" id="iOk">Incluir</button>
+      <button class="bt-cinza bt-grande" type="button" id="iGuardar" style="margin-top:10px">Salvar para concluir depois</button>
+      <p class="dica" style="text-align:center">Falta alguma informação? Guarde como inclusão em aberto: nada entra no saldo até você concluir.</p>
     </form>`;
-  $("#iData").value = BASE.hoje; $("#iData").max = BASE.hoje;
+  $("#iData").max = BASE.hoje;
+  montarCampos();
+  $$("[data-modo]").forEach((o) => o.onclick = () => modo(o.dataset.modo));
+  $$("[data-estado]").forEach((o) => o.onclick = () => marcarEstado(o.dataset.estado));
+  $("#iSemNf").onchange = semNf;
+  $("#f").onsubmit = enviar;
+  $("#iGuardar").onclick = guardar;
+  await limparForm(param("bem"));
+  await listarAbertas();
+});
+
+function montarCampos() {
   cat = campoCategoria($("#iCat"));
   foto = campoArquivo($("#iFoto"), { texto: "Tirar ou escolher foto" });
   nf = campoArquivo($("#iNf"), { tipo: "nf", texto: "Anexar PDF ou foto da nota" });
   local = campoLocal($("#iLocal"));
-  $$("[data-modo]").forEach((o) => o.onclick = () => modo(o.dataset.modo));
-  $$("[data-estado]").forEach((o) => o.onclick = () => { $$("[data-estado]").forEach((x) => x.classList.toggle("on", x === o)); $("input", o).checked = true; });
-  $('[data-estado="novo"]').click();
-  $("#iSemNf").onchange = () => { $("#blComNf").hidden = $("#iSemNf").checked; $("#blSemNf").hidden = !$("#iSemNf").checked; };
-  await campoBem($("#iBem"), (b) => {
-    BEM = b;
-    $("#iBemInfo").textContent = b ? `Hoje: ${b.disponivel} disponíve${b.disponivel === 1 ? "l" : "is"}, ${b.adquirido} adquirida(s) em aquisições anteriores. Esta entrada fica separada como uma nova aquisição.` : "";
-  }, { bemId: param("bem") });
-  modo(MODO);
-  $("#f").onsubmit = enviar;
-});
-
+}
+function marcarEstado(e) { $$("[data-estado]").forEach((x) => { x.classList.toggle("on", x.dataset.estado === e); $("input", x).checked = x.dataset.estado === e; }); }
+function semNf() { $("#blComNf").hidden = $("#iSemNf").checked; $("#blSemNf").hidden = !$("#iSemNf").checked; }
 function modo(m) {
   MODO = m;
   $$("[data-modo]").forEach((x) => x.classList.toggle("on", x.dataset.modo === m));
   $("#blNovo").hidden = m !== "novo";
   $("#blExistente").hidden = m !== "existente";
-  $("#iOk").textContent = m === "novo" ? "Cadastrar e incluir" : "Incluir quantidade";
+  $("#iOk").textContent = RASC ? "Concluir inclusão" : m === "novo" ? "Cadastrar e incluir" : "Incluir quantidade";
+}
+async function escolherBem(bemId) {
+  await campoBem($("#iBem"), (b) => {
+    BEM = b;
+    $("#iBemInfo").textContent = b ? `Hoje: ${b.disponivel} disponíve${b.disponivel === 1 ? "l" : "is"}, ${b.adquirido} adquirida(s) em aquisições anteriores. Esta entrada fica separada como uma nova aquisição.` : "";
+  }, { bemId });
+}
+
+// Todos os campos do formulário, do jeito que estão (vai para o rascunho e para o envio)
+function coletar() {
+  const v = (id) => $(id).value;
+  return {
+    descricao: v("#iDesc"), codigo_sistema: v("#iSis"), codigo_patrimonio: v("#iPat"), categoria_id: cat.value,
+    quantidade: v("#iQtd"), data_aquisicao: v("#iData"), local_id: local.value, estado: $('input[name="estado"]:checked')?.value || "",
+    sem_nf: $("#iSemNf").checked, fornecedor: v("#iForn"), valor_unitario: v("#iValor"), nf_numero: v("#iNfNum"),
+    sem_nf_obs: v("#iSemNfObs"), fornecedor2: v("#iForn2"), valor_unitario2: v("#iValor2"),
+    garantia_ate: v("#iGar"), vida_util_anos: v("#iVida"), obs: v("#iObs"),
+  };
+}
+async function limparForm(bemId = null) {
+  RASC = null; BEM = null;
+  $("#f").reset();
+  $("#iData").value = BASE.hoje;
+  $("#continuando").hidden = true;
+  montarCampos();
+  marcarEstado("novo"); semNf();
+  await escolherBem(bemId);
+  modo(bemId ? "existente" : "novo");
+}
+async function continuar(r) {
+  await limparForm();
+  RASC = r;
+  const d = r.dados || {};
+  const put = (id, val) => { if (val !== undefined && val !== null) $(id).value = val; };
+  put("#iDesc", d.descricao); put("#iSis", d.codigo_sistema); put("#iPat", d.codigo_patrimonio);
+  put("#iQtd", d.quantidade); put("#iData", d.data_aquisicao || BASE.hoje);
+  put("#iForn", d.fornecedor); put("#iValor", d.valor_unitario); put("#iNfNum", d.nf_numero);
+  put("#iSemNfObs", d.sem_nf_obs); put("#iForn2", d.fornecedor2); put("#iValor2", d.valor_unitario2);
+  put("#iGar", d.garantia_ate); put("#iVida", d.vida_util_anos); put("#iObs", d.obs);
+  $("#iSemNf").checked = !!d.sem_nf; semNf();
+  if (d.estado) marcarEstado(d.estado);
+  cat = campoCategoria($("#iCat"), d.categoria_id || "");
+  local = campoLocal($("#iLocal"), { valor: d.local_id || "" });
+  foto.existente(r.foto_url, "Foto já guardada");
+  nf.existente(r.nf_url, "Nota fiscal já guardada");
+  if (r.modo === "existente") await escolherBem(r.bem_id);
+  modo(r.modo);
+  $("#continuando").hidden = false;
+  $("#continuando").innerHTML = `Continuando a inclusão em aberto de <b>${esc(r.bem?.descricao || d.descricao || "")}</b>, guardada por ${esc(r.atualizado_por || r.criado_por)} em ${fmtDataHora(r.atualizado_em)}. <button class="bt-link" type="button" id="btSairRasc" style="padding:0">começar outra do zero</button>`;
+  $("#btSairRasc").onclick = () => limparForm();
+  $("#f").scrollIntoView({ behavior: "smooth" });
+}
+
+async function listarAbertas() {
+  try { RASCUNHOS = (await api("/rascunhos")).rascunhos; } catch { RASCUNHOS = []; }
+  const box = $("#abertas");
+  if (!RASCUNHOS.length) { box.innerHTML = ""; return; }
+  box.innerHTML = `<div class="alerta-lista amb" style="margin-bottom:16px"><h3>Inclusões em aberto (${RASCUNHOS.length})</h3>
+    ${RASCUNHOS.map((r) => {
+      const d = r.dados || {};
+      const falta = [];
+      if (r.modo === "novo") { if (!d.codigo_sistema) falta.push("cód. sistema"); if (!d.codigo_patrimonio) falta.push("patrimônio"); if (!d.categoria_id) falta.push("categoria"); }
+      if (!d.quantidade) falta.push("quantidade"); if (!d.local_id) falta.push("local");
+      if (!d.sem_nf) { if (!d.fornecedor) falta.push("fornecedor"); if (!d.valor_unitario) falta.push("valor"); if (!r.nf_path) falta.push("nota fiscal"); }
+      return `<div class="linha"><div class="txt"><div class="tit">${esc(r.modo === "existente" ? (r.bem?.descricao || "Bem") + " · mais unidades" : d.descricao)}${d.quantidade ? " · " + esc(d.quantidade) + " un." : ""}</div>
+        <div class="sub">Guardada por ${esc(r.atualizado_por || r.criado_por)} em ${fmtDataHora(r.atualizado_em)}${falta.length ? ` · falta: ${falta.join(", ")}` : " · pronta para concluir"}</div></div>
+        <button class="bt-mini bt-mar" data-cont="${r.id}">Continuar</button><button class="bt-x" data-exc="${r.id}" title="Excluir" aria-label="Excluir">×</button></div>`;
+    }).join("")}</div>`;
+  $$("[data-cont]").forEach((b) => b.onclick = () => continuar(RASCUNHOS.find((r) => r.id === b.dataset.cont)));
+  $$("[data-exc]").forEach((b) => b.onclick = async () => {
+    const r = RASCUNHOS.find((x) => x.id === b.dataset.exc);
+    if (!(await confirmar(`Excluir a inclusão em aberto de <b>${esc(r.bem?.descricao || r.dados?.descricao || "")}</b>? O que foi guardado (inclusive foto e nota) se perde.`, "Excluir inclusão em aberto", "Excluir"))) return;
+    try { await api(`/rascunhos/${r.id}/excluir`, { body: {} }); if (RASC?.id === r.id) await limparForm(); toast("Excluída."); listarAbertas(); }
+    catch (e) { toast(e.message, true); }
+  });
+}
+
+async function guardar() {
+  $("#iErro").textContent = "";
+  const bt = $("#iGuardar"); bt.disabled = true; bt.textContent = "Guardando…";
+  try {
+    const r = await api("/rascunhos", { body: { id: RASC?.id, modo: MODO, bem_id: BEM?.id, dados: coletar(), foto: MODO === "novo" ? foto.valor() : null, nf: $("#iSemNf").checked ? null : nf.valor() } });
+    toast("Guardada em inclusões em aberto. Nada entrou no saldo ainda.");
+    await limparForm();
+    await listarAbertas();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  } catch (er) { $("#iErro").textContent = er.message; }
+  bt.disabled = false; bt.textContent = "Salvar para concluir depois";
 }
 
 async function enviar(e) {
   e.preventDefault();
   $("#iErro").textContent = "";
-  const semNf = $("#iSemNf").checked;
+  const d = coletar(), semNfMarcado = d.sem_nf;
   const corpo = {
-    quantidade: $("#iQtd").value, data_aquisicao: $("#iData").value, local_id: local.value,
-    estado: $('input[name="estado"]:checked')?.value, sem_nf: semNf,
-    fornecedor: semNf ? $("#iForn2").value : $("#iForn").value, valor_unitario: semNf ? $("#iValor2").value : $("#iValor").value,
-    nf: semNf ? null : nf.valor(), sem_nf_obs: $("#iSemNfObs").value,
-    garantia_ate: $("#iGar").value, vida_util_anos: $("#iVida").value, obs: $("#iObs").value,
+    quantidade: d.quantidade, data_aquisicao: d.data_aquisicao, local_id: d.local_id, estado: d.estado, sem_nf: semNfMarcado,
+    fornecedor: semNfMarcado ? d.fornecedor2 : d.fornecedor, valor_unitario: semNfMarcado ? d.valor_unitario2 : d.valor_unitario,
+    nf_numero: semNfMarcado ? "" : d.nf_numero, nf: semNfMarcado ? null : nf.valor(), sem_nf_obs: d.sem_nf_obs,
+    garantia_ate: d.garantia_ate, vida_util_anos: d.vida_util_anos, obs: d.obs, rascunho_id: RASC?.id || null,
   };
   let rota = "/bens";
-  if (MODO === "novo") Object.assign(corpo, { descricao: $("#iDesc").value, codigo_sistema: $("#iSis").value, codigo_patrimonio: $("#iPat").value, categoria_id: cat.value, foto: foto.valor() });
+  if (MODO === "novo") Object.assign(corpo, { descricao: d.descricao, codigo_sistema: d.codigo_sistema, codigo_patrimonio: d.codigo_patrimonio, categoria_id: d.categoria_id, foto: foto.valor() });
   else { if (!BEM) { $("#iErro").textContent = "Escolha o bem."; return; } rota = `/bens/${BEM.id}/entrada`; }
-  const bt = $("#iOk"); bt.disabled = true; bt.textContent = "Salvando…";
+  const bt = $("#iOk"); bt.disabled = true; const txt = bt.textContent; bt.textContent = "Salvando…";
   try {
     const r = await api(rota, { body: corpo });
     _bensCache = null;
@@ -122,7 +218,7 @@ async function enviar(e) {
       <p>${esc(corpo.quantidade)} unidade(s) ${ESTADO_NOME[corpo.estado].toLowerCase()} em ${esc(nomeLocal(corpo.local_id))} · aquisição nº ${r.numero}.</p>
       <a class="bt-mar bt-grande" style="display:block;text-decoration:none;margin-top:16px" href="bem.html?id=${r.bem_id}">Ver a ficha do bem</a>
       <a class="link" href="incluir.html" style="display:inline-block">Incluir outro</a></div>`;
-  } catch (er) { $("#iErro").textContent = er.message; bt.disabled = false; modo(MODO); }
+  } catch (er) { $("#iErro").textContent = er.message; bt.disabled = false; bt.textContent = txt; }
 }
 </script>
 </body>
