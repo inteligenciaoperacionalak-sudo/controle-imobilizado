@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Conferência · Imobilizado</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="comum.css">
+<style>
+.item{background:var(--branco);border:1px solid var(--linha);border-radius:12px;padding:12px 14px;margin-top:8px}
+.item.pend{border-left:4px solid var(--ambar)}
+.item .cab{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}
+.item .esp{font-size:13px;color:var(--cinza);margin-top:2px}
+.cont{display:grid;grid-template-columns:repeat(3,1fr) auto;gap:8px;align-items:end;margin-top:8px}
+.cont label{margin:0 0 4px;font-size:12px}
+.cont input{text-align:center;font-size:18px;font-weight:700;padding:10px 6px}
+.cont .res{min-width:90px;text-align:right;font-size:15px;padding-bottom:10px}
+.salvo{font-size:12px;color:var(--verde-escuro);font-weight:700}
+@media print{.item{break-inside:avoid}}
+</style>
+</head>
+<body>
+<main>
+  <p class="msg">Carregando…</p>
+</main>
+<script src="comum.js"></script>
+<script src="xlsx.js"></script>
+<script>
+const ID = param("id");
+const ESCOPO = { local: "Todos os bens do local", categoria: "Por categoria", bens: "Por bem" };
+let CF = null, IT = [], FILTRO = "todos";
+const tot = (i, p) => (i[p + "novo"] ?? 0) + (i[p + "bom"] ?? 0) + (i[p + "ruim"] ?? 0);
+const contado = (i) => i.cont_novo !== null && i.cont_bom !== null && i.cont_ruim !== null;
+
+iniciar(carregar);
+
+async function carregar() {
+  const r = await api("/conferencias/" + ID);
+  CF = r.conferencia; IT = r.itens;
+  const aberta = CF.status === "aberta", editar = aberta && pode("conferente");
+  const feitos = IT.filter(contado).length;
+  $("main").innerHTML = `
+    <p class="nao-imprimir" style="margin-bottom:10px"><a href="conferencias.html">← Conferências</a></p>
+    <div class="titulo"><div><h2>Conferência nº ${CF.numero}</h2><p>${esc(CF.unidade)} · ${esc(CF.local?.nome)} · ${ESCOPO[CF.escopo]}${CF.categoria ? ": " + esc(CF.categoria.nome) : ""}</p>
+      <p>Aberta em ${fmtDataHora(CF.aberta_em)} por ${esc(CF.aberta_por)}${CF.lancada_em ? ` · lançada em ${fmtDataHora(CF.lancada_em)} por ${esc(CF.lancada_por)}` : ""}${CF.obs ? " · " + esc(CF.obs) : ""}</p></div>
+      <div>${pillStatus(CF.status)}</div></div>
+    ${aberta ? `<div class="nota nao-imprimir">Aberta: pode contar aos poucos e corrigir o que precisar — cada número é salvo sozinho. Depois de <b>lançar</b>, não dá para mexer em mais nada; só gerando outra conferência.</div>` : ""}
+    ${CF.resumo ? `<div class="numeros"><div class="num"><b>${CF.resumo.itens}</b><span>itens</span></div><div class="num ok"><b>${CF.resumo.conferem}</b><span>conferem</span></div><div class="num ${CF.resumo.unidades_falta ? "alerta" : ""}"><b>${CF.resumo.unidades_falta}</b><span>unidades faltando (viram "não localizado")</span></div><div class="num ${CF.resumo.unidades_sobra ? "aviso" : ""}"><b>${CF.resumo.unidades_sobra}</b><span>unidades sobrando</span></div><div class="num"><b>${CF.resumo.mudou_estado}</b><span>só mudou o estado</span></div></div>` : `
+    <div class="numeros"><div class="num"><b>${feitos} / ${IT.length}</b><span>contados</span><div class="barra"><i style="width:${IT.length ? Math.round(feitos / IT.length * 100) : 0}%"></i></div></div></div>`}
+    <div class="filtro nao-imprimir"><input type="search" id="fBusca" placeholder="Buscar bem">
+      <select id="fMostrar" style="width:auto"><option value="todos">Todos</option><option value="falta">Faltando contar</option><option value="dif">Com diferença</option></select>
+      <button class="bt-cinza" id="btExcel">Excel</button><button class="bt-cinza" onclick="window.print()">Imprimir</button></div>
+    <div id="itens"></div>
+    ${editar ? `<div class="caixa secao nao-imprimir"><h3 style="margin-top:0">Achou um bem que não está na lista?</h3><div id="addBem"></div></div>
+      <div class="acoes nao-imprimir" style="margin-top:20px"><button class="bt-verde bt-grande" id="btLancar">Lançar conferência</button></div>` : ""}
+    ${aberta && ehAdmin() ? `<div class="acoes nao-imprimir"><button class="bt-link" id="btCancelar" style="color:var(--verm)">Cancelar esta conferência</button></div>` : ""}`;
+  $("#fBusca").oninput = desenhar; $("#fMostrar").onchange = desenhar;
+  $("#btExcel").onclick = exportar;
+  desenhar();
+  if (editar) {
+    campoBem($("#addBem"), async (b) => {
+      if (!b) return;
+      try { await api(`/conferencias/${ID}/adicionar`, { body: { bem_id: b.id } }); toast("Adicionado à lista."); carregar(); }
+      catch (e) { toast(e.message, true); carregar(); }
+    });
+    $("#btLancar").onclick = lancar;
+  }
+  if ($("#btCancelar")) $("#btCancelar").onclick = () => modal(`<h2>Cancelar a conferência nº ${CF.numero}</h2><p class="msg">Nada do que foi contado entra no saldo. Fica registrado com o motivo.</p><label>Motivo</label><input id="cxMot" type="text"><div class="erro" id="cxErro"></div><div class="acoes"><button class="bt-verm" id="cxOk">Cancelar conferência</button><button class="bt-cinza" data-fechar>Voltar</button></div>`, (d) => {
+    $("#cxOk", d).onclick = async () => { try { await api(`/conferencias/${ID}/cancelar`, { body: { motivo: $("#cxMot", d).value } }); d.close(); carregar(); } catch (e) { $("#cxErro", d).textContent = e.message; } };
+  });
+}
+
+function dif(i) {
+  if (!contado(i)) return "";
+  const d = tot(i, "cont_") - tot(i, "esp_");
+  const mudou = d === 0 && (i.cont_novo !== i.esp_novo || i.cont_bom !== i.esp_bom || i.cont_ruim !== i.esp_ruim);
+  return d < 0 ? `<span class="dif falta">falta ${-d}</span>` : d > 0 ? `<span class="dif sobra">sobra ${d}</span>` : mudou ? `<span class="dif sobra">mudou estado</span>` : `<span class="dif ok">confere</span>`;
+}
+function desenhar() {
+  const t = normBusca($("#fBusca").value.trim()), m = $("#fMostrar").value;
+  const editar = CF.status === "aberta" && pode("conferente");
+  const lista = IT.filter((i) => !t || normBusca(i.bem?.descricao + " " + i.bem?.codigo_patrimonio + " " + i.bem?.codigo_sistema).includes(t))
+    .filter((i) => m === "todos" || (m === "falta" ? !contado(i) : contado(i) && (tot(i, "cont_") !== tot(i, "esp_") || i.cont_novo !== i.esp_novo || i.cont_bom !== i.esp_bom)));
+  $("#itens").innerHTML = lista.length ? lista.map((i) => `
+    <div class="item ${!contado(i) && editar ? "pend" : ""}" data-id="${i.id}">
+      <div class="cab"><div><b>${esc(i.bem?.descricao)}</b>${i.adicionado ? ` <span class="pill neutro">adicionado</span>` : ""}
+        <div class="esp">Patrim. ${esc(i.bem?.codigo_patrimonio || "—")} · ${CF.status === "aberta" ? "No sistema agora" : "Esperado"}: ${i.esp_novo} novo · ${i.esp_bom} bom · ${i.esp_ruim} ruim = <b>${tot(i, "esp_")}</b>${i.nao_localizado ? ` · <span class="dif falta">${i.nao_localizado} não localizado</span>` : ""}</div></div>
+        <span class="salvo" data-salvo></span></div>
+      ${editar ? `<div class="cont">
+        ${ESTADOS.map((e) => `<div><label>${ESTADO_NOME[e]}</label><input type="number" min="0" inputmode="numeric" data-e="${e}" value="${i["cont_" + e] ?? ""}" placeholder="—"></div>`).join("")}
+        <div class="res" data-res>${dif(i)}</div></div>
+        <input type="text" data-obs placeholder="Observação (opcional)" value="${esc(i.obs || "")}" style="margin-top:8px;font-size:14px;padding:8px 10px">
+        ${i.adicionado ? `<button class="bt-link" data-remover style="font-size:13px;padding:6px 0 0">tirar da lista</button>` : ""}`
+      : `<div class="esp" style="margin-top:6px;font-size:14px;color:var(--tinta)">Contado: ${contado(i) ? `${i.cont_novo} novo · ${i.cont_bom} bom · ${i.cont_ruim} ruim = <b>${tot(i, "cont_")}</b> · ${dif(i)}` : `<span class="pill pendente">não contado</span>`}${i.contado_por ? ` · por ${esc(i.contado_por)} em ${fmtDataHora(i.contado_em)}` : ""}${i.obs ? " · " + esc(i.obs) : ""}</div>`}
+    </div>`).join("") : `<div class="caixa vazio"><b>Nada para mostrar com esse filtro.</b></div>`;
+  if (!editar) return;
+  $$("#itens .item").forEach((card) => {
+    let h = null;
+    const salvar = () => {
+      clearTimeout(h);
+      h = setTimeout(async () => {
+        const i = IT.find((x) => x.id === card.dataset.id);
+        const v = (e) => { const x = $(`[data-e="${e}"]`, card).value; return x === "" ? null : Number(x); };
+        const novo = { id: i.id, cont_novo: v("novo"), cont_bom: v("bom"), cont_ruim: v("ruim"), obs: $("[data-obs]", card).value };
+        // um campo em branco com outro preenchido conta como zero
+        if (novo.cont_novo !== null || novo.cont_bom !== null || novo.cont_ruim !== null) for (const e of ESTADOS) if (novo["cont_" + e] === null) { novo["cont_" + e] = 0; $(`[data-e="${e}"]`, card).value = 0; }
+        try {
+          await api(`/conferencias/${ID}/contagem`, { body: { itens: [novo] } });
+          Object.assign(i, novo, { contado_por: BASE.usuario.login });
+          $("[data-res]", card).innerHTML = dif(i);
+          card.classList.toggle("pend", !contado(i));
+          $("[data-salvo]", card).textContent = "salvo ✓";
+          atualizarProgresso();
+        } catch (e) { $("[data-salvo]", card).textContent = ""; toast(e.message, true); }
+      }, 500);
+    };
+    $$("input", card).forEach((inp) => inp.addEventListener("change", salvar));
+    const rem = $("[data-remover]", card);
+    if (rem) rem.onclick = async () => { try { await api(`/conferencias/${ID}/remover`, { body: { item_id: card.dataset.id } }); carregar(); } catch (e) { toast(e.message, true); } };
+  });
+}
+function atualizarProgresso() {
+  const n = IT.filter(contado).length, b = $(".numeros .num");
+  if (b && CF.status === "aberta") b.innerHTML = `<b>${n} / ${IT.length}</b><span>contados</span><div class="barra"><i style="width:${IT.length ? Math.round(n / IT.length * 100) : 0}%"></i></div>`;
+}
+async function lancar() {
+  const faltam = IT.filter((i) => !contado(i));
+  if (faltam.length) { toast(`Faltam ${faltam.length} item(ns) para contar. Digite 0 onde não achou nada.`, true); $("#fMostrar").value = "falta"; desenhar(); return; }
+  const falta = IT.reduce((a, i) => a + Math.max(0, tot(i, "esp_") - tot(i, "cont_")), 0);
+  const sobra = IT.reduce((a, i) => a + Math.max(0, tot(i, "cont_") - tot(i, "esp_")), 0);
+  const ok = await confirmar(`${IT.length} itens contados. ${falta ? `<b>${falta} unidade(s) faltando</b> vão ficar como "não localizado". ` : ""}${sobra ? `<b>${sobra} unidade(s) sobrando</b> entram no saldo como ajuste de conferência. ` : ""}O saldo de ${esc(CF.local?.nome)} passa a ser o que foi contado, por estado.<br><br><b>Depois de lançada, a conferência não pode mais ser alterada.</b>`, "Lançar conferência", "Lançar");
+  if (!ok) return;
+  try { await api(`/conferencias/${ID}/lancar`, { body: {} }); toast("Conferência lançada."); carregar(); }
+  catch (e) { toast(e.message, true); carregar(); }
+}
+function exportar() {
+  const linhas = [["Bem", "Cód. patrimônio", "Cód. sistema", "Esperado novo", "Esperado bom", "Esperado ruim", "Esperado total", "Contado novo", "Contado bom", "Contado ruim", "Contado total", "Diferença", "Obs.", "Contado por"]];
+  IT.forEach((i) => linhas.push([i.bem?.descricao, i.bem?.codigo_patrimonio, i.bem?.codigo_sistema, i.esp_novo, i.esp_bom, i.esp_ruim, tot(i, "esp_"), i.cont_novo, i.cont_bom, i.cont_ruim, contado(i) ? tot(i, "cont_") : "", contado(i) ? tot(i, "cont_") - tot(i, "esp_") : "", i.obs, i.contado_por]));
+  gerarXlsx(`conferencia-${CF.numero}-${(CF.local?.nome || "").replace(/\W+/g, "-")}.xlsx`, [{ nome: "Conferência " + CF.numero, linhas }]);
+}
+</script>
+</body>
+</html>

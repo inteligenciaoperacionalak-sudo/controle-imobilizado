@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Retirar · Imobilizado</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="comum.css">
+</head>
+<body>
+<main>
+  <p class="msg">Carregando…</p>
+</main>
+<script src="comum.js"></script>
+<script>
+let TIPO = ["manutencao", "emprestimo", "baixa"].includes(param("tipo")) ? param("tipo") : "manutencao";
+let BEM = null, D = null, ass = null, assMan = null, fotoBaixa = null;
+const TITULOS = { manutencao: "Manutenção", emprestimo: "Empréstimo", baixa: "Solicitação de baixa" };
+
+iniciar(async () => {
+  D = await carregarBens();
+  $("main").innerHTML = `
+    <div class="titulo"><div><h2>Retirar</h2><p>Tudo o que sai do disponível: manutenção, empréstimo ou pedido de baixa.</p></div></div>
+    <div class="opcoes" style="grid-template-columns:repeat(3,1fr)">
+      ${Object.entries(TITULOS).map(([k, v]) => `<label class="opcao" data-tipo="${k}"><input type="radio" name="tipo" value="${k}">${v === "Solicitação de baixa" ? "Baixa" : v}</label>`).join("")}
+    </div>
+    <form id="f" novalidate>
+      <div class="form-tit" style="margin-top:22px;padding-top:14px;border-top:1px solid var(--linha)">Bem</div>
+      <div id="rBem" style="margin-top:8px"></div>
+      <div class="grade2">
+        <div><label for="rDe">De onde sai (local e estado) <span class="obrig">*</span></label><select id="rDe"><option value="">Escolha o bem primeiro</option></select></div>
+        <div><label for="rQtd">Quantidade <span class="obrig">*</span></label><input id="rQtd" type="number" min="1" inputmode="numeric"></div>
+      </div>
+
+      <div data-so="manutencao emprestimo">
+        <div class="form-tit">Dados</div>
+        <div class="grade2">
+          <div><label for="rData" id="rDataLbl">Data</label><input id="rData" type="date"></div>
+          <div><label for="rPrazo">Prazo de retorno <span class="obrig">*</span></label><input id="rPrazo" type="date"></div>
+          <div data-so="emprestimo" class="cheio"><label for="rSolic">Solicitado por <span class="obrig">*</span> <span class="opc">— pessoa ou empresa que pediu</span></label><input id="rSolic" type="text"></div>
+          <div><label for="rTel" id="rTelLbl">Telefone <span class="obrig">*</span></label><input id="rTel" type="tel" inputmode="tel" placeholder="(73) 9 0000-0000"></div>
+          <div><label for="rLib">Liberado por (nome completo) <span class="obrig">*</span></label><input id="rLib" type="text"></div>
+        </div>
+        <label for="rObs">Observação</label><textarea id="rObs" rows="2"></textarea>
+        <p class="dica">Quando o prazo de retorno passar, aparece um alerta na tela inicial.</p>
+      </div>
+
+      <div data-so="manutencao">
+        <div class="form-tit">Empresa / responsável pela manutenção</div>
+        <label for="rEmp">Nome <span class="obrig">*</span></label><input id="rEmp" type="text">
+        <label>Assinatura <span class="opc">(não obrigatória)</span></label><div id="rAssMan"></div>
+      </div>
+
+      <div data-so="emprestimo">
+        <div class="form-tit">Assinatura de quem retirou</div>
+        <label for="rNome">Nome <span class="obrig">*</span></label><input id="rNome" type="text">
+        <label>Assinatura <span class="obrig">*</span> <span class="opc">— assine com o dedo no quadro</span></label><div id="rAss"></div>
+      </div>
+
+      <div data-so="baixa">
+        <div class="form-tit">Baixa</div>
+        <label>Foto do bem <span class="obrig">*</span></label><div id="rFoto"></div>
+        <label for="rObsBaixa">Observação <span class="obrig">*</span></label><textarea id="rObsBaixa" rows="3" placeholder="Relate o motivo da baixa"></textarea>
+        <p class="dica">Data e usuário entram sozinhos (${esc(BASE.usuario.nome)}). A quantidade sai do disponível e fica "baixa pendente" até o ADM validar.</p>
+      </div>
+
+      <div class="erro" id="rErro"></div>
+      <button class="bt-mar bt-grande" type="submit" id="rOk">Registrar</button>
+    </form>`;
+  mascaraTel($("#rTel"));
+  $("#rData").value = BASE.hoje;
+  $("#rLib").value = BASE.usuario.nome;
+  ass = campoAssinatura($("#rAss"), "Assinatura de quem retirou");
+  assMan = campoAssinatura($("#rAssMan"), "Assinatura do responsável");
+  fotoBaixa = campoArquivo($("#rFoto"), { texto: "Tirar foto do bem" });
+  $$("[data-tipo]").forEach((o) => o.onclick = () => trocar(o.dataset.tipo));
+  await campoBem($("#rBem"), (b) => { BEM = b; opcoesDe(); }, { bemId: param("bem") });
+  trocar(TIPO);
+  $("#rDe").onchange = () => { const o = $("#rDe").selectedOptions[0]; $("#rQtd").max = o?.dataset.qtd || ""; if (o?.dataset.qtd === "1") $("#rQtd").value = 1; };
+  $("#f").onsubmit = enviar;
+});
+
+function opcoesDe() {
+  const ops = BEM ? opcoesSaldo(BEM.id, D) : [];
+  $("#rDe").innerHTML = !BEM ? `<option value="">Escolha o bem primeiro</option>` : ops.length
+    ? (ops.length > 1 ? `<option value="">Escolha</option>` : "") + ops.map((o) => `<option value="${o.valor}" data-qtd="${o.qtd}">${esc(o.texto)}</option>`).join("")
+    : `<option value="">Sem unidades disponíveis</option>`;
+  $("#rDe").dispatchEvent(new Event("change"));
+}
+function trocar(t) {
+  TIPO = t;
+  $$("[data-tipo]").forEach((x) => x.classList.toggle("on", x.dataset.tipo === t));
+  $$("[data-so]").forEach((el) => el.hidden = !el.dataset.so.split(" ").includes(t));
+  $("#rDataLbl").innerHTML = (t === "emprestimo" ? "Data de retirada" : "Data de início da manutenção") + ' <span class="obrig">*</span>';
+  $("#rTelLbl").innerHTML = (t === "manutencao" ? "Telefone da manutenção" : "Telefone") + ' <span class="obrig">*</span>';
+  $("#rOk").textContent = t === "baixa" ? "Pedir baixa" : "Registrar " + TITULOS[t].toLowerCase();
+  $("#rOk").className = (t === "baixa" ? "bt-verm" : "bt-mar") + " bt-grande";
+  history.replaceState(null, "", "?tipo=" + t + (BEM ? "&bem=" + BEM.id : ""));
+  requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
+}
+
+async function enviar(e) {
+  e.preventDefault();
+  $("#rErro").textContent = "";
+  if (!BEM) { $("#rErro").textContent = "Escolha o bem."; return; }
+  const [local_id, estado] = ($("#rDe").value || "|").split("|");
+  if (!local_id) { $("#rErro").textContent = "Escolha de onde sai."; return; }
+  const quantidade = $("#rQtd").value;
+  let rota, corpo;
+  if (TIPO === "baixa") {
+    rota = "/baixas";
+    corpo = { origem: "saldo", bem_id: BEM.id, local_id, estado, quantidade, obs: $("#rObsBaixa").value, foto: fotoBaixa.valor() };
+    if (!corpo.foto) { $("#rErro").textContent = "Tire a foto do bem."; return; }
+  } else {
+    rota = "/saidas";
+    corpo = { tipo: TIPO, bem_id: BEM.id, local_id, estado, quantidade, data_saida: $("#rData").value, prazo_retorno: $("#rPrazo").value, telefone: $("#rTel").value, liberado_por: $("#rLib").value, obs: $("#rObs").value };
+    if (TIPO === "emprestimo") {
+      Object.assign(corpo, { solicitado_por: $("#rSolic").value, responsavel_nome: $("#rNome").value, assinatura: ass.valor() });
+      if (!corpo.assinatura) { $("#rErro").textContent = "Falta a assinatura de quem está retirando."; return; }
+    } else Object.assign(corpo, { empresa: $("#rEmp").value, responsavel_nome: $("#rEmp").value, assinatura: assMan.valor() });
+  }
+  const bt = $("#rOk"); bt.disabled = true; const txt = bt.textContent; bt.textContent = "Salvando…";
+  try {
+    const r = await api(rota, { body: corpo });
+    _bensCache = null;
+    $("main").innerHTML = `<div class="resultado ok"><div class="ic">✓</div>
+      <h2>${TIPO === "baixa" ? `Pedido de baixa nº ${r.numero} enviado` : `${TITULOS[TIPO]} nº ${r.numero} registrado`}</h2>
+      <p>${esc(quantidade)} un. de ${esc(BEM.descricao)} saíram de ${esc(nomeLocal(local_id))}.</p>
+      ${TIPO === "baixa" ? `<p>Fica como "baixa pendente" até o ADM validar.</p>` : `<p>Prazo de retorno: ${fmtData(corpo.prazo_retorno)}. A devolução é feita na tela Empréstimos e manutenções.</p>`}
+      ${TIPO !== "baixa" ? `<a class="bt-mar bt-grande" style="display:block;text-decoration:none" href="emprestimos.html?id=${r.saida_id}">Ver o registro</a>` : `<a class="bt-mar bt-grande" style="display:block;text-decoration:none" href="bem.html?id=${BEM.id}">Ver a ficha do bem</a>`}
+      <a class="link" href="retirar.html?tipo=${TIPO}" style="display:inline-block">Registrar outro</a></div>`;
+  } catch (er) { $("#rErro").textContent = er.message; bt.disabled = false; bt.textContent = txt; }
+}
+</script>
+</body>
+</html>

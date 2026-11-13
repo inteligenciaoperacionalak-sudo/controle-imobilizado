@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Conferências · Imobilizado</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="comum.css">
+</head>
+<body>
+<main>
+  <p class="msg">Carregando…</p>
+</main>
+<script src="comum.js"></script>
+<script>
+const ESCOPO = { local: "Todos os bens do local", categoria: "Por categoria", bens: "Por bem" };
+let C = [];
+
+iniciar(async () => {
+  C = (await api("/conferencias")).conferencias;
+  const abertas = C.filter((c) => c.status === "aberta");
+  const lancadas = C.filter((c) => c.status === "lancada");
+  // última conferência lançada de cada local
+  const ultima = {};
+  for (const c of lancadas) if (!ultima[c.local_id] || c.lancada_em > ultima[c.local_id].lancada_em) ultima[c.local_id] = c;
+  const res = (r) => r ? `${r.itens} ite${r.itens === 1 ? "m" : "ns"} · ${r.conferem} conferem${r.com_falta ? ` · <span class="dif falta">${r.unidades_falta} faltando</span>` : ""}${r.com_sobra ? ` · <span class="dif sobra">${r.unidades_sobra} sobrando</span>` : ""}${r.mudou_estado ? ` · ${r.mudou_estado} mudou de estado` : ""}` : "";
+  $("main").innerHTML = `
+    <div class="titulo"><div><h2>Conferências</h2><p>Escolha a unidade e o local, gere a lista e conte. Aberta, pode ser editada pelo tempo que precisar; depois de lançada, trava.</p></div>
+      ${pode("conferente") ? `<button class="bt-mar" id="btNova">+ Gerar conferência</button>` : ""}</div>
+    <div class="caixa" id="nova" hidden></div>
+    <div class="secao"><h3>Abertas</h3>
+      ${abertas.length ? `<div class="caixa">${abertas.map((c) => { const p = c.progresso || { itens: 0, contados: 0 }; return `<a class="linha clic" href="conferencia.html?id=${c.id}" style="text-decoration:none;color:inherit"><div class="txt"><div class="tit">Nº ${c.numero} · ${esc(c.unidade)} · ${esc(c.local?.nome)}</div><div class="sub">${ESCOPO[c.escopo]}${c.categoria ? ": " + esc(c.categoria.nome) : ""} · aberta em ${fmtDataHora(c.aberta_em)} por ${esc(c.aberta_por)} · ${p.contados} de ${p.itens} contados</div><div class="barra"><i style="width:${p.itens ? Math.round(p.contados / p.itens * 100) : 0}%"></i></div></div><span class="chev">›</span></a>`; }).join("")}</div>` : `<div class="caixa msg">Nenhuma conferência aberta.</div>`}
+    </div>
+    <div class="secao"><h3>Última conferência de cada local</h3>
+      <div class="caixa rolar"><table class="tabela"><thead><tr><th>Local</th><th>Última conferência</th><th>Quem fez</th><th>Resultado</th></tr></thead><tbody>
+      ${BASE.locais.filter((l) => l.ativo).map((l) => { const c = ultima[l.id]; return `<tr ${c ? `class="clic" data-id="${c.id}"` : ""}><td>${esc(l.unidade)} · ${esc(l.nome)}</td><td>${c ? fmtDataHora(c.lancada_em) + ` · nº ${c.numero}` : `<span class="pill pendente">nunca conferido</span>`}</td><td>${c ? esc(c.lancada_por) : ""}</td><td>${c ? res(c.resumo) : ""}</td></tr>`; }).join("")}
+      </tbody></table></div>
+    </div>
+    <div class="secao"><h3>Histórico</h3>
+      ${C.filter((c) => c.status !== "aberta").length ? `<div class="caixa">${C.filter((c) => c.status !== "aberta").map((c) => `<a class="linha clic" href="conferencia.html?id=${c.id}" style="text-decoration:none;color:inherit"><div class="txt"><div class="tit">Nº ${c.numero} · ${esc(c.unidade)} · ${esc(c.local?.nome)} ${pillStatus(c.status)}</div><div class="sub">${ESCOPO[c.escopo]}${c.categoria ? ": " + esc(c.categoria.nome) : ""} · ${c.status === "lancada" ? `lançada em ${fmtDataHora(c.lancada_em)} por ${esc(c.lancada_por)} · ${res(c.resumo)}` : esc(c.obs || "")}</div></div><span class="chev">›</span></a>`).join("")}</div>` : `<div class="caixa msg">Nenhuma conferência lançada ainda.</div>`}
+    </div>`;
+  $$("tr[data-id]").forEach((tr) => tr.onclick = () => location.href = "conferencia.html?id=" + tr.dataset.id);
+  if ($("#btNova")) $("#btNova").onclick = formNova;
+});
+
+async function formNova() {
+  const box = $("#nova");
+  box.hidden = false;
+  let bens = [];
+  box.innerHTML = `<h3 style="margin-top:0">Gerar conferência</h3>
+    <div class="grade2">
+      <div><label>Unidade</label><select id="nUn"><option value="CD">CD</option><option value="Cabana">Cabana</option></select></div>
+      <div><label>Local de conferência</label><div id="nLocal"></div></div>
+    </div>
+    <label>O que conferir</label>
+    <div class="opcoes" style="grid-template-columns:repeat(3,1fr)">${Object.entries(ESCOPO).map(([k, v]) => `<label class="opcao" data-esc="${k}"><input type="radio" name="esc" value="${k}">${v}</label>`).join("")}</div>
+    <div id="nCatBox" hidden><label>Categoria</label><select id="nCat"><option value="">Escolha</option>${BASE.categorias.map((c) => `<option value="${c.id}">${esc(c.nome)}</option>`).join("")}</select></div>
+    <div id="nBensBox" hidden><label>Bens <span class="opc">— escolha um por vez</span></label><div id="nBem"></div><div id="nBensLista" class="codigos" style="margin-top:8px"></div></div>
+    <label>Observação <span class="opc">(opcional)</span></label><input id="nObs" type="text">
+    <div class="erro" id="nErro"></div>
+    <div class="acoes"><button class="bt-mar" id="nOk">Gerar lista e começar</button><button class="bt-cinza" id="nCancelar">Cancelar</button></div>`;
+  let loc = null;
+  const montarLocal = () => { loc = campoLocal($("#nLocal"), { unidade: $("#nUn").value }); };
+  $("#nUn").onchange = montarLocal; montarLocal();
+  let escopo = "local";
+  const marcar = (k) => { escopo = k; $$("[data-esc]").forEach((x) => x.classList.toggle("on", x.dataset.esc === k)); $("#nCatBox").hidden = k !== "categoria"; $("#nBensBox").hidden = k !== "bens"; };
+  $$("[data-esc]").forEach((o) => o.onclick = () => marcar(o.dataset.esc)); marcar("local");
+  const desenharBens = () => { $("#nBensLista").innerHTML = bens.map((b) => `<span class="codigo">${esc(b.descricao)} <button type="button" class="bt-x" data-tira="${b.id}" aria-label="Tirar">×</button></span>`).join(""); $$("[data-tira]").forEach((x) => x.onclick = () => { bens = bens.filter((b) => b.id !== x.dataset.tira); desenharBens(); }); };
+  const novoCampo = () => campoBem($("#nBem"), (b) => { if (b && !bens.some((x) => x.id === b.id)) { bens.push(b); desenharBens(); } if (b) setTimeout(novoCampo, 0); });
+  novoCampo();
+  $("#nCancelar").onclick = () => { box.hidden = true; };
+  $("#nOk").onclick = async () => {
+    $("#nErro").textContent = ""; $("#nOk").disabled = true;
+    try {
+      const r = await api("/conferencias", { body: { local_id: loc.value, escopo, categoria_id: $("#nCat").value, bens: bens.map((b) => b.id), obs: $("#nObs").value } });
+      location.href = "conferencia.html?id=" + r.conferencia.id;
+    } catch (e) { $("#nErro").textContent = e.message; $("#nOk").disabled = false; }
+  };
+  box.scrollIntoView({ behavior: "smooth" });
+}
+</script>
+</body>
+</html>

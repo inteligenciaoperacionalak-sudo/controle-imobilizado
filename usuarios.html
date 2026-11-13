@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Usuários · Imobilizado</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="comum.css">
+</head>
+<body>
+<main class="larga">
+  <p class="msg">Carregando…</p>
+</main>
+<script src="comum.js"></script>
+<script>
+const PERFIL_DESC = {
+  admin: "Tudo: valida baixas, edita dados, cria usuários e vê o registro geral",
+  operador: "Cadastra e inclui, retira (empréstimo, manutenção), recebe devolução, transfere e pede baixa",
+  conferente: "Gera, conta e lança conferências",
+  consulta: "Só vê",
+};
+const ACAO = { login: "Entrou no sistema", trocar_senha: "Trocou a senha", criar_local: "Criou local", editar_local: "Editou local", criar_categoria: "Criou categoria", editar_categoria: "Editou categoria", abrir_conferencia: "Abriu conferência", lancar_conferencia: "Lançou conferência", cancelar_conferencia: "Cancelou conferência", criar_usuario: "Criou usuário", editar_usuario: "Editou usuário" };
+let ABA = "usuarios", U = [];
+
+iniciar(() => desenhar(), { perfis: [] });
+
+async function desenhar() {
+  $("main").innerHTML = `
+    <div class="titulo"><div><h2>Administração</h2><p>Usuários e acessos, locais e categorias, e o registro de tudo o que foi feito.</p></div></div>
+    <div class="abas">${[["usuarios", "Usuários"], ["cadastros", "Locais e categorias"], ["registro", "Registro geral"]].map(([k, v]) => `<button class="aba ${ABA === k ? "on" : ""}" data-aba="${k}">${v}</button>`).join("")}</div>
+    <div id="conteudo"><p class="msg">Carregando…</p></div>`;
+  $$("[data-aba]").forEach((b) => b.onclick = () => { ABA = b.dataset.aba; desenhar(); });
+  if (ABA === "usuarios") await usuarios();
+  if (ABA === "cadastros") cadastros();
+  if (ABA === "registro") await registro();
+}
+
+function formUsuario(u = null) {
+  modal(`<h2>${u ? "Editar " + esc(u.nome) : "Novo usuário"}</h2>
+    <label>Nome</label><input id="uNome" type="text" value="${esc(u?.nome || "")}">
+    <label>Usuário <span class="opc">(para entrar: letras minúsculas, sem espaço)</span></label><input id="uLogin" type="text" autocapitalize="none" value="${esc(u?.login || "")}">
+    <label>${u ? "Nova senha temporária <span class='opc'>(deixe em branco para manter)</span>" : "Senha temporária"}</label><input id="uSenha" type="text" autocomplete="off" placeholder="mínimo 6 caracteres">
+    <p class="dica">No primeiro acesso a pessoa troca pela senha dela.</p>
+    <label>Acesso</label>
+    <select id="uPerfil">${Object.entries(BASE.perfis).map(([k, v]) => `<option value="${k}" ${u?.perfil === k ? "selected" : ""}>${v} — ${PERFIL_DESC[k]}</option>`).join("")}</select>
+    ${u ? `<label class="check"><input type="checkbox" id="uAtivo" ${u.ativo ? "checked" : ""}> Acesso ativo</label>` : ""}
+    <div class="erro" id="uErro"></div>
+    <div class="acoes"><button class="bt-mar" id="uOk">Salvar</button><button class="bt-cinza" data-fechar>Cancelar</button></div>`, (d) => {
+    if (!u) $("#uPerfil", d).value = "operador";
+    $("#uNome", d).oninput = () => { if (!u && !$("#uLogin", d).dataset.mexeu) { const p = normBusca($("#uNome", d).value).trim().split(/\s+/); $("#uLogin", d).value = p.length > 1 ? p[0] + "." + p[p.length - 1] : p[0]; } };
+    $("#uLogin", d).oninput = () => { $("#uLogin", d).dataset.mexeu = 1; };
+    $("#uOk", d).onclick = async () => {
+      try {
+        await api("/usuarios", { body: { id: u?.id, nome: $("#uNome", d).value, login: $("#uLogin", d).value, senha: $("#uSenha", d).value, perfil: $("#uPerfil", d).value, ativo: u ? $("#uAtivo", d).checked : true } });
+        toast("Usuário salvo."); d.close(); usuarios();
+      } catch (e) { $("#uErro", d).textContent = e.message; }
+    };
+  });
+}
+
+async function usuarios() {
+  U = (await api("/usuarios")).usuarios;
+  $("#conteudo").innerHTML = `
+    <div class="acoes" style="margin:0 0 12px"><button class="bt-mar" id="btNovo">+ Novo usuário</button></div>
+    <div class="caixa rolar"><table class="tabela"><thead><tr><th>Nome</th><th>Usuário</th><th>Acesso</th><th>Situação</th><th>Último acesso</th><th></th></tr></thead><tbody>
+      ${U.map((u) => `<tr class="clic" data-id="${u.id}"><td><b>${esc(u.nome)}</b></td><td>${esc(u.login)}</td><td>${esc(u.perfil_nome)}</td><td>${u.ativo ? (u.trocar_senha ? `<span class="pill pendente">senha temporária</span>` : `<span class="pill ativo">ativo</span>`) : `<span class="pill inativo">desativado</span>`}</td><td>${fmtDataHora(u.ultimo_acesso) || "—"}</td><td><button class="bt-mini bt-cinza" data-editar="${u.id}">Editar</button></td></tr>`).join("")}
+    </tbody></table></div>
+    <p class="dica">Clique na pessoa para ver tudo o que ela movimentou.</p>
+    <div id="atividade"></div>`;
+  $("#btNovo").onclick = () => formUsuario();
+  $$("[data-editar]").forEach((b) => b.onclick = (e) => { e.stopPropagation(); formUsuario(U.find((u) => u.id === b.dataset.editar)); });
+  $$("tr[data-id]").forEach((tr) => tr.onclick = () => atividade(U.find((u) => u.id === tr.dataset.id)));
+}
+async function atividade(u) {
+  $("#atividade").innerHTML = `<p class="msg">Carregando…</p>`;
+  const r = await api(`/usuarios/${u.id}/atividade`);
+  $("#atividade").innerHTML = `
+    <div class="secao"><h3>Movimentações de ${esc(u.nome)} (${r.movimentos.length})</h3><div class="caixa">${listaHistorico(r.movimentos, { mostrarBem: true })}</div></div>
+    <div class="secao"><h3>Outras ações</h3><div class="caixa">${logHtml(r.log)}</div></div>`;
+  $("#atividade").scrollIntoView({ behavior: "smooth" });
+}
+function logHtml(lg) {
+  if (!lg.length) return `<div class="vazio"><b>Nada registrado.</b></div>`;
+  return `<div class="hist-mov">${lg.map((l) => { const d = l.detalhes || {}; const extra = d.nome || d.local || (d.depois ? JSON.stringify(d.depois).replace(/[{}"]/g, "").replace(/,/g, ", ") : "") || (d.numero ? "nº " + d.numero : "") || d.motivo || ""; return `<div class="linha"><div class="quando">${fmtDataHora(l.quando)}<br>${esc(l.usuario)}</div><div class="txt">${esc(ACAO[l.acao] || l.acao)}${extra ? " · " + esc(extra) : ""}${d.motivo && extra !== d.motivo ? " · " + esc(d.motivo) : ""}</div></div>`; }).join("")}</div>`;
+}
+
+function cadastros() {
+  $("#conteudo").innerHTML = `
+    <div class="grade2" style="gap:0 18px">
+      <div><h3>Locais</h3><div class="caixa">${BASE.locais.map((l) => `<div class="linha"><div class="txt"><div class="tit">${esc(l.nome)}</div><div class="sub">${esc(l.unidade)}${l.ativo ? "" : " · desativado"}</div></div><button class="bt-mini bt-cinza" data-local="${l.id}">Editar</button></div>`).join("")}</div>
+        <div class="acoes" id="addLocal"></div></div>
+      <div><h3>Categorias</h3><div class="caixa">${BASE.categorias.length ? BASE.categorias.map((c) => `<div class="linha"><div class="txt"><div class="tit">${esc(c.nome)}</div>${c.ativo ? "" : `<div class="sub">desativada</div>`}</div><button class="bt-mini bt-cinza" data-cat="${c.id}">Editar</button></div>`).join("") : `<div class="vazio"><b>Nenhuma ainda.</b>São criadas na hora do cadastro, pelo +.</div>`}</div></div>
+    </div>
+    <p class="dica">Desativar esconde o local ou a categoria das listas de escolha; o que já foi lançado continua no histórico.</p>`;
+  const editar = (tipo, obj) => modal(`<h2>Editar ${tipo === "local" ? "local" : "categoria"}</h2>
+    <label>Nome</label><input id="xNome" type="text" value="${esc(obj.nome)}">
+    <label class="check"><input type="checkbox" id="xAtivo" ${obj.ativo ? "checked" : ""}> Ativo</label>
+    <div class="erro" id="xErro"></div><div class="acoes"><button class="bt-mar" id="xOk">Salvar</button><button class="bt-cinza" data-fechar>Cancelar</button></div>`, (d) => {
+    $("#xOk", d).onclick = async () => {
+      try { await api(`/${tipo === "local" ? "locais" : "categorias"}/${obj.id}`, { body: { nome: $("#xNome", d).value, ativo: $("#xAtivo", d).checked } }); await recarregarBase(); d.close(); toast("Salvo."); cadastros(); }
+      catch (e) { $("#xErro", d).textContent = e.message; }
+    };
+  });
+  $$("[data-local]").forEach((b) => b.onclick = () => editar("local", localPorId(b.dataset.local)));
+  $$("[data-cat]").forEach((b) => b.onclick = () => editar("cat", BASE.categorias.find((c) => c.id === b.dataset.cat)));
+  const s = campoLocal($("#addLocal"), { vazio: "Adicionar local pelo + ao lado →" });
+  s.disabled = true;
+  s.addEventListener("change", () => cadastros());
+}
+
+async function registro() {
+  const r = await api("/registro");
+  $("#conteudo").innerHTML = `
+    <div class="secao" style="margin-top:0"><h3 style="margin-top:0">Movimentações (últimas ${r.movimentos.length})</h3><div class="caixa">${listaHistorico(r.movimentos, { mostrarBem: true })}</div></div>
+    <div class="secao"><h3>Acessos e cadastros (últimos ${r.log.length})</h3><div class="caixa">${logHtml(r.log)}</div></div>`;
+}
+</script>
+</body>
+</html>

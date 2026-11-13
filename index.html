@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Início · Imobilizado</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="comum.css">
+</head>
+<body>
+<main>
+  <p class="msg">Carregando…</p>
+</main>
+<script src="comum.js"></script>
+<script>
+iniciar(async () => {
+  const [a, d] = await Promise.all([api("/alertas"), carregarBens()]);
+  const soma = (k) => d.bens.reduce((t, b) => t + Number(b[k] || 0), 0);
+  const linhaSaida = (s) => {
+    const aberto = s.quantidade - s.qtd_devolvida - s.qtd_baixa;
+    const para = s.tipo === "emprestimo" ? s.solicitado_por : s.empresa;
+    return `<a class="linha clic" href="emprestimos.html?id=${s.id}" style="text-decoration:none;color:inherit">
+      <div class="txt"><div class="tit">${esc(s.bem?.descricao)} · ${aberto} un.</div>
+      <div class="sub">${TIPO_SAIDA[s.tipo]} nº ${s.numero} · ${esc(para || "")} · ${fmtTel(s.telefone)}</div></div>${prazoTexto(s.prazo_retorno)}</a>`;
+  };
+  const atalhos = [
+    pode("operador") && ["incluir.html", "Incluir", "Bem novo ou mais quantidade"],
+    pode("operador") && ["retirar.html", "Retirar", "Empréstimo, manutenção ou baixa"],
+    pode("operador") && ["transferir.html", "Transferir", "Mudar de local"],
+    ["emprestimos.html", "Empréstimos e manutenções", "Abertos e devoluções"],
+    ["conferencias.html", "Conferências", "Gerar e lançar"],
+    ["bens.html", "Consulta geral", "Tudo o que existe e onde está"],
+  ].filter(Boolean);
+  $("main").innerHTML = `
+    <div class="titulo"><div><h2>Olá, ${esc(BASE.usuario.nome.split(" ")[0])}</h2><p>Hoje é ${fmtData(a.hoje)}.</p></div></div>
+    <div class="numeros">
+      <a class="num" href="bens.html" style="text-decoration:none"><b>${num(d.bens.length)}</b><span>bens cadastrados</span></a>
+      <a class="num" href="bens.html?sit=disponivel" style="text-decoration:none"><b>${num(soma("disponivel"))}</b><span>unidades disponíveis</span></a>
+      <a class="num" href="bens.html?sit=emprestado" style="text-decoration:none"><b>${num(soma("emprestado"))}</b><span>emprestadas</span></a>
+      <a class="num" href="bens.html?sit=manutencao" style="text-decoration:none"><b>${num(soma("manutencao"))}</b><span>em manutenção</span></a>
+      <a class="num ${a.nao_localizado ? "alerta" : ""}" href="bens.html?sit=nao_localizado" style="text-decoration:none"><b>${num(a.nao_localizado)}</b><span>não localizadas</span></a>
+    </div>
+    <h3>Alertas</h3>
+    ${a.vencidas.length ? `<div class="alerta-lista verm"><h3>Prazo de retorno vencido (${a.vencidas.length})</h3>${a.vencidas.map(linhaSaida).join("")}</div>` : ""}
+    ${a.vencendo.length ? `<div class="alerta-lista amb"><h3>Vencem em até 3 dias (${a.vencendo.length})</h3>${a.vencendo.map(linhaSaida).join("")}</div>` : ""}
+    ${a.baixas_pendentes ? `<div class="alerta-lista amb"><a class="linha clic" href="baixas.html" style="text-decoration:none;color:inherit"><div class="txt"><div class="tit">${a.baixas_pendentes} pedido${a.baixas_pendentes > 1 ? "s" : ""} de baixa aguardando ${ehAdmin() ? "sua validação" : "o ADM"}</div></div><span class="chev">›</span></a></div>` : ""}
+    ${a.conferencias_abertas.length ? `<div class="alerta-lista"><h3>Conferências abertas (${a.conferencias_abertas.length})</h3>${a.conferencias_abertas.map((c) => `<a class="linha clic" href="conferencia.html?id=${c.id}" style="text-decoration:none;color:inherit"><div class="txt"><div class="tit">Nº ${c.numero} · ${esc(c.unidade)} · ${esc(c.local?.nome)}</div><div class="sub">aberta em ${fmtDataHora(c.aberta_em)} por ${esc(c.aberta_por)}</div></div><span class="chev">›</span></a>`).join("")}</div>` : ""}
+    ${a.nao_localizado ? `<div class="alerta-lista verm"><a class="linha clic" href="bens.html?sit=nao_localizado" style="text-decoration:none;color:inherit"><div class="txt"><div class="tit">${a.nao_localizado} unidade${a.nao_localizado > 1 ? "s" : ""} não localizada${a.nao_localizado > 1 ? "s" : ""} em conferência</div><div class="sub">Achou? Registre na ficha do bem. Não vai voltar? Peça a baixa.</div></div><span class="chev">›</span></a></div>` : ""}
+    ${a.entradas_sem_nf ? `<div class="alerta-lista"><a class="linha clic" href="bens.html?sit=sem_nf" style="text-decoration:none;color:inherit"><div class="txt"><div class="tit">${a.entradas_sem_nf} aquisiç${a.entradas_sem_nf > 1 ? "ões" : "ão"} sem nota fiscal anexada</div></div><span class="chev">›</span></a></div>` : ""}
+    ${!a.vencidas.length && !a.vencendo.length && !a.baixas_pendentes && !a.conferencias_abertas.length && !a.nao_localizado ? `<div class="caixa"><b>Nada pendente.</b> <span class="msg">Nenhum prazo vencido, nenhuma baixa esperando e nenhuma conferência aberta.</span></div>` : ""}
+    <h3>Atalhos</h3>
+    <div class="atalhos">${atalhos.map(([h, t, s]) => `<a class="atalho" href="${h}"><b>${t}</b><span>${s}</span></a>`).join("")}</div>`;
+});
+</script>
+</body>
+</html>

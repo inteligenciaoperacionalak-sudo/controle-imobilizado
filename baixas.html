@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Baixas · Imobilizado</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="comum.css">
+<style>
+.pedido{display:flex;gap:12px;background:var(--branco);border:1px solid var(--ambar);border-radius:12px;padding:12px;margin-top:8px}
+.pedido img{width:110px;height:110px;object-fit:cover;border-radius:8px;border:1px solid var(--linha);cursor:pointer;flex:none}
+.pedido .semfoto{width:110px;height:110px;border-radius:8px;background:var(--cinza-claro);display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--cinza);text-align:center;flex:none}
+@media (max-width:520px){.pedido{flex-direction:column}.pedido img,.pedido .semfoto{width:100%;height:200px}}
+</style>
+</head>
+<body>
+<main class="larga">
+  <p class="msg">Carregando…</p>
+</main>
+<script src="comum.js"></script>
+<script src="xlsx.js"></script>
+<script>
+let B = [];
+const origem = (x) => x.origem === "saida" ? `não voltou do ${TIPO_SAIDA[x.saida?.tipo]?.toLowerCase() || "empréstimo"} nº ${x.saida?.numero}` : x.origem === "nao_localizado" ? `não localizado em ${nomeLocal(x.local_id)}` : `${nomeLocal(x.local_id)} · ${ESTADO_NOME[x.estado]?.toLowerCase()}`;
+
+iniciar(carregar);
+
+async function carregar() {
+  B = (await api("/baixas")).baixas;
+  const pend = B.filter((x) => x.status === "pendente");
+  // quantidade baixada por bem (só aprovadas)
+  const porBem = {};
+  B.filter((x) => x.status === "aprovada").forEach((x) => { const k = x.bem_id; porBem[k] ||= { bem: x.bem, q: 0, n: 0 }; porBem[k].q += x.quantidade; porBem[k].n++; });
+  $("main").innerHTML = `
+    <div class="titulo"><div><h2>Baixas</h2><p>${ehAdmin() ? "Valide os pedidos: aprovar tira do imobilizado; recusar devolve a quantidade para onde estava." : "Pedidos de baixa e o histórico. Só o ADM valida."}</p></div>
+      <div class="acoes" style="margin:0">${pode("operador") ? `<a class="bt-verm" style="padding:11px 16px;border-radius:8px;text-decoration:none;font-weight:600" href="retirar.html?tipo=baixa">+ Pedir baixa</a>` : ""}<button class="bt-cinza" id="btExcel">Exportar Excel</button></div></div>
+    <div class="secao"><h3>${ehAdmin() ? "Validar baixas" : "Aguardando validação do ADM"} ${pend.length ? `<span class="pill pendente">${pend.length}</span>` : ""}</h3>
+      ${pend.length ? pend.map((x) => `<div class="pedido">
+        ${x.foto_url ? `<img src="${esc(x.foto_url)}" alt="Foto do bem" data-foto="${esc(x.foto_url)}">` : `<div class="semfoto">sem foto${x.origem !== "saldo" ? "<br>(não estava no local)" : ""}</div>`}
+        <div style="flex:1;min-width:0"><b style="font-size:17px">${x.quantidade} un. · <a href="bem.html?id=${x.bem_id}">${esc(x.bem?.descricao)}</a></b>
+          <div class="msg" style="margin:2px 0">Pedido nº ${x.numero} · patrim. ${esc(x.bem?.codigo_patrimonio || "—")} · ${esc(origem(x))}</div>
+          <p style="margin:8px 0;font-size:15px">“${esc(x.obs)}”</p>
+          <div class="msg" style="margin:0">Pedido por <b>${esc(x.solicitado_por)}</b> em ${fmtDataHora(x.solicitado_em)}</div>
+          ${ehAdmin() ? `<div class="acoes"><button class="bt-verde" data-aprovar="${x.id}">Aprovar baixa</button><button class="bt-cinza" data-recusar="${x.id}">Recusar</button></div>` : ""}
+        </div></div>`).join("") : `<div class="caixa msg">Nenhum pedido esperando.</div>`}
+    </div>
+    <div class="secao"><h3>Baixas aprovadas por bem</h3>
+      ${Object.keys(porBem).length ? `<div class="caixa rolar"><table class="tabela"><thead><tr><th>Bem</th><th>Patrimônio</th><th class="n">Pedidos aprovados</th><th class="n">Unidades baixadas</th></tr></thead><tbody>
+      ${Object.entries(porBem).sort((a, b) => b[1].q - a[1].q).map(([id, v]) => `<tr class="clic" data-bem="${id}"><td>${esc(v.bem?.descricao)}</td><td>${esc(v.bem?.codigo_patrimonio || "")}</td><td class="n">${v.n}</td><td class="n"><b>${v.q}</b></td></tr>`).join("")}
+      </tbody></table></div>` : `<div class="caixa msg">Nenhuma baixa aprovada ainda.</div>`}
+    </div>
+    <div class="secao"><h3>Histórico de baixas</h3>
+      <div class="filtro"><input type="search" id="fBusca" placeholder="Buscar bem, pessoa ou motivo"><select id="fSt" style="width:auto"><option value="">Todas</option><option value="aprovada">Aprovadas</option><option value="recusada">Recusadas</option><option value="pendente">Pendentes</option></select></div>
+      <div class="caixa rolar"><table class="tabela" id="hist"></table></div>
+    </div>`;
+  $$("[data-foto]").forEach((i) => i.onclick = () => verImagem(i.dataset.foto, "Foto do bem"));
+  $$("[data-bem]").forEach((tr) => tr.onclick = () => location.href = "bem.html?id=" + tr.dataset.bem);
+  $$("[data-aprovar]").forEach((bt) => bt.onclick = () => validar(bt.dataset.aprovar, true));
+  $$("[data-recusar]").forEach((bt) => bt.onclick = () => validar(bt.dataset.recusar, false));
+  $("#fBusca").oninput = historico; $("#fSt").onchange = historico;
+  $("#btExcel").onclick = exportar;
+  historico();
+}
+function filtrado() {
+  const t = normBusca($("#fBusca").value.trim()), st = $("#fSt").value;
+  return B.filter((x) => (!st || x.status === st) && (!t || normBusca([x.bem?.descricao, x.bem?.codigo_patrimonio, x.obs, x.solicitado_por, x.validado_por].join(" ")).includes(t)));
+}
+function historico() {
+  const l = filtrado();
+  $("#hist").innerHTML = l.length ? `<thead><tr><th>Data</th><th>Bem</th><th class="n">Qtd.</th><th>De onde</th><th>Motivo (obs.)</th><th>Pedido por</th><th>Situação</th><th>Foto</th></tr></thead><tbody>
+    ${l.map((x) => `<tr><td>${fmtDataHora(x.solicitado_em)}</td><td><a href="bem.html?id=${x.bem_id}">${esc(x.bem?.descricao)}</a><div class="msg" style="margin:0;font-size:12px">nº ${x.numero}</div></td><td class="n">${x.quantidade}</td><td>${esc(origem(x))}</td><td>${esc(x.obs)}</td><td>${esc(x.solicitado_por)}</td>
+      <td>${pillStatus(x.status)}${x.validado_por ? `<div class="msg" style="margin:2px 0 0;font-size:12px">${esc(x.validado_por)} · ${fmtDataHora(x.validado_em)}${x.motivo_recusa ? "<br>" + esc(x.motivo_recusa) : ""}</div>` : ""}</td>
+      <td>${x.foto_url ? `<img class="foto-mini" src="${esc(x.foto_url)}" alt="Foto" data-foto2="${esc(x.foto_url)}">` : ""}</td></tr>`).join("")}</tbody>`
+    : `<tr><td><div class="vazio"><b>Nenhuma baixa.</b></div></td></tr>`;
+  $$("[data-foto2]").forEach((i) => i.onclick = () => verImagem(i.dataset.foto2, "Foto do bem"));
+}
+function validar(id, aprovar) {
+  const x = B.find((b) => b.id === id);
+  modal(`<h2>${aprovar ? "Aprovar" : "Recusar"} baixa nº ${x.numero}</h2>
+    <p class="msg" style="color:var(--tinta);font-size:15px">${x.quantidade} un. de <b>${esc(x.bem?.descricao)}</b> · ${esc(origem(x))}</p>
+    ${aprovar ? `<p class="msg">Aprovando, essas unidades saem do imobilizado de vez.</p>` : `<p class="msg">Recusando, a quantidade volta para onde estava (${esc(origem(x))}).</p><label>Motivo da recusa <span class="obrig">*</span></label><input id="vMot" type="text">`}
+    <div class="erro" id="vErro"></div>
+    <div class="acoes"><button class="${aprovar ? "bt-verde" : "bt-verm"}" id="vOk">${aprovar ? "Aprovar" : "Recusar"}</button><button class="bt-cinza" data-fechar>Voltar</button></div>`, (d) => {
+    $("#vOk", d).onclick = async () => {
+      try { await api(`/baixas/${id}/validar`, { body: { aprovar, motivo: aprovar ? "" : $("#vMot", d).value } }); toast(aprovar ? "Baixa aprovada." : "Baixa recusada."); d.close(); carregar(); }
+      catch (e) { $("#vErro", d).textContent = e.message; }
+    };
+  });
+}
+function exportar() {
+  const linhas = [["Nº", "Data do pedido", "Bem", "Cód. patrimônio", "Quantidade", "De onde", "Motivo (obs.)", "Pedido por", "Situação", "Validado por", "Data da validação", "Motivo da recusa"]];
+  filtrado().forEach((x) => linhas.push([x.numero, fmtDataHora(x.solicitado_em), x.bem?.descricao, x.bem?.codigo_patrimonio, x.quantidade, origem(x), x.obs, x.solicitado_por, STATUS_NOME[x.status], x.validado_por, fmtDataHora(x.validado_em), x.motivo_recusa]));
+  gerarXlsx("baixas-" + BASE.hoje + ".xlsx", [{ nome: "Baixas", linhas }]);
+}
+</script>
+</body>
+</html>

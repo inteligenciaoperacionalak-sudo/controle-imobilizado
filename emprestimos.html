@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Empréstimos e manutenções · Imobilizado</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="comum.css">
+</head>
+<body>
+<main>
+  <p class="msg">Carregando…</p>
+</main>
+<script src="comum.js"></script>
+<script src="xlsx.js"></script>
+<script>
+let STATUS = "aberta", LISTA = [];
+const aberto = (s) => s.quantidade - s.qtd_devolvida - s.qtd_baixa;
+const para = (s) => s.tipo === "emprestimo" ? s.solicitado_por : s.empresa;
+
+iniciar(async () => { if (param("id")) return detalhe(param("id")); await lista(); });
+
+async function lista() {
+  history.replaceState(null, "", "emprestimos.html");
+  const r = await api("/saidas?status=" + STATUS);
+  LISTA = r.saidas;
+  $("main").innerHTML = `
+    <div class="titulo"><div><h2>Empréstimos e manutenções</h2><p>O que saiu e ainda não voltou. A devolução é feita aqui, com a conferência da volta.</p></div>
+      <div class="acoes" style="margin:0">${pode("operador") ? `<a class="bt-mar" style="padding:11px 16px;border-radius:8px;text-decoration:none;font-weight:600" href="retirar.html?tipo=emprestimo">+ Novo</a>` : ""}<button class="bt-cinza" id="btExcel">Exportar Excel</button></div></div>
+    <div class="abas"><button class="aba ${STATUS === "aberta" ? "on" : ""}" data-st="aberta">Em aberto</button><button class="aba ${STATUS === "encerrada" ? "on" : ""}" data-st="encerrada">Encerrados</button></div>
+    <div class="filtro"><input type="search" id="fBusca" placeholder="Buscar bem, pessoa ou empresa"><select id="fTipo" style="width:auto"><option value="">Empréstimos e manutenções</option><option value="emprestimo">Só empréstimos</option><option value="manutencao">Só manutenções</option></select></div>
+    <div class="caixa" id="lista"></div>`;
+  $$("[data-st]").forEach((b) => b.onclick = () => { STATUS = b.dataset.st; lista(); });
+  $("#fBusca").oninput = desenhar; $("#fTipo").onchange = desenhar;
+  $("#btExcel").onclick = exportar;
+  desenhar();
+}
+function filtrada() {
+  const t = normBusca($("#fBusca").value.trim()), tp = $("#fTipo").value;
+  return LISTA.filter((s) => (!tp || s.tipo === tp) && (!t || normBusca([s.bem?.descricao, s.bem?.codigo_patrimonio, s.solicitado_por, s.empresa, s.responsavel_nome].join(" ")).includes(t)));
+}
+function desenhar() {
+  const l = filtrada();
+  $("#lista").innerHTML = l.length ? l.map((s) => `<div class="linha clic" data-id="${s.id}"><div class="txt">
+      <div class="tit">${esc(s.bem?.descricao)} · ${STATUS === "aberta" ? aberto(s) + " em aberto" : s.quantidade + " un."}</div>
+      <div class="sub">${TIPO_SAIDA[s.tipo]} nº ${s.numero} · ${esc(para(s) || "")} · ${fmtTel(s.telefone)} · saiu ${fmtData(s.data_saida)} de ${esc(nomeLocal(s.local_id))}</div></div>
+      ${STATUS === "aberta" ? prazoTexto(s.prazo_retorno) : pillStatus(s.status)}<span class="chev">›</span></div>`).join("")
+    : `<div class="vazio"><b>${STATUS === "aberta" ? "Nada em aberto." : "Nenhum registro encerrado."}</b></div>`;
+  $$("#lista [data-id]").forEach((el) => el.onclick = () => detalhe(el.dataset.id));
+}
+function exportar() {
+  const linhas = [["Nº", "Tipo", "Bem", "Patrimônio", "Saiu de", "Estado", "Quantidade", "Devolvida", "Baixa", "Em aberto", "Data de saída", "Prazo de retorno", "Solicitado por / empresa", "Quem retirou / responsável", "Telefone", "Liberado por", "Situação", "Obs."]];
+  filtrada().forEach((s) => linhas.push([s.numero, TIPO_SAIDA[s.tipo], s.bem?.descricao, s.bem?.codigo_patrimonio, nomeLocal(s.local_id), ESTADO_NOME[s.estado], s.quantidade, s.qtd_devolvida, s.qtd_baixa, aberto(s), fmtData(s.data_saida), fmtData(s.prazo_retorno), para(s), s.responsavel_nome, fmtTel(s.telefone), s.liberado_por, STATUS_NOME[s.status], s.obs]));
+  gerarXlsx("emprestimos-manutencoes-" + BASE.hoje + ".xlsx", [{ nome: STATUS === "aberta" ? "Em aberto" : "Encerrados", linhas }]);
+}
+
+async function detalhe(id) {
+  history.replaceState(null, "", "emprestimos.html?id=" + id);
+  const r = await api("/saidas/" + id);
+  const s = r.saida, ab = aberto(s);
+  const wa = String(s.telefone || "").replace(/\D/g, "");
+  $("main").innerHTML = `
+    <p style="margin-bottom:10px"><a href="#" id="voltar">← Empréstimos e manutenções</a></p>
+    <div class="titulo"><div><h2>${TIPO_SAIDA[s.tipo]} nº ${s.numero}</h2><p><a href="bem.html?id=${s.bem.id}">${esc(s.bem.descricao)}</a> · patrim. ${esc(s.bem.codigo_patrimonio || "—")}</p></div>
+      <div>${s.status === "aberta" ? prazoTexto(s.prazo_retorno) : pillStatus(s.status)}</div></div>
+    <div class="numeros">
+      <div class="num"><b>${s.quantidade}</b><span>saíram (${ESTADO_NOME[s.estado].toLowerCase()})</span></div>
+      <div class="num ok"><b>${s.qtd_devolvida}</b><span>voltaram</span></div>
+      <div class="num"><b>${s.qtd_baixa}</b><span>em baixa</span></div>
+      <div class="num ${ab ? "aviso" : ""}"><b>${ab}</b><span>em aberto</span></div>
+    </div>
+    <div class="caixa">
+      <div class="grade2" style="font-size:15px">
+        <div><label>${s.tipo === "emprestimo" ? "Data de retirada" : "Início da manutenção"}</label>${fmtData(s.data_saida)}</div>
+        <div><label>Prazo de retorno</label>${fmtData(s.prazo_retorno)}</div>
+        <div><label>Saiu de</label>${esc(nomeLocal(s.local_id))}</div>
+        <div><label>${s.tipo === "emprestimo" ? "Solicitado por" : "Empresa / responsável"}</label>${esc(para(s) || "—")}</div>
+        <div><label>Telefone</label>${fmtTel(s.telefone)} ${wa ? `· <a href="tel:${wa}">ligar</a> · <a href="https://wa.me/55${wa}" target="_blank" rel="noopener">WhatsApp</a>` : ""}</div>
+        <div><label>Liberado por</label>${esc(s.liberado_por)}</div>
+        ${s.tipo === "emprestimo" ? `<div><label>Quem retirou</label>${esc(s.responsavel_nome || "—")}</div>` : ""}
+        <div><label>Lançado por</label>${esc(s.criado_por)} em ${fmtDataHora(s.criado_em)}</div>
+        ${s.obs ? `<div class="cheio"><label>Observação</label>${esc(s.obs)}</div>` : ""}
+        <div class="cheio"><label>Assinatura${s.tipo === "emprestimo" ? " de quem retirou" : ""}</label>${s.assinatura_url ? `<img class="ass-img" src="${esc(s.assinatura_url)}" alt="Assinatura">` : `<span class="msg">Sem assinatura.</span>`}</div>
+      </div>
+    </div>
+    ${s.status === "aberta" && pode("operador") ? `
+    <div class="caixa secao" id="boxDev">
+      <h3 style="margin-top:0">Registrar devolução (conferência da volta)</h3>
+      <p class="msg">Conte o que voltou e separe por estado. Pode devolver em partes: o restante continua em aberto.</p>
+      <div class="grade3">
+        <div><label>Voltou novo</label><input id="dN" type="number" min="0" value="0"></div>
+        <div><label>Voltou bom</label><input id="dB" type="number" min="0" value="0"></div>
+        <div><label>Voltou ruim</label><input id="dR" type="number" min="0" value="0"></div>
+      </div>
+      <div class="grade2">
+        <div><label>Data da devolução</label><input id="dData" type="date" value="${BASE.hoje}" max="${BASE.hoje}"></div>
+        <div><label>Volta para o local</label><div id="dLocal"></div></div>
+      </div>
+      <label>Observação</label><input id="dObs" type="text" placeholder="Ex.: voltou com o encosto riscado">
+      <p class="dica" id="dSoma">Em aberto: ${ab}.</p>
+      <div class="erro" id="dErro"></div>
+      <div class="acoes"><button class="bt-verde" id="dOk">Registrar devolução</button><button class="bt-link" id="btNaoVolta">Não vai voltar? Pedir baixa</button></div>
+    </div>` : ""}
+    <div class="secao"><h3>Devoluções</h3>
+      ${r.devolucoes.length ? `<div class="caixa">${r.devolucoes.map((v) => `<div class="linha"><div class="txt"><div class="tit">${v.qtd_novo + v.qtd_bom + v.qtd_ruim} un. em ${fmtData(v.data_devolucao)}</div><div class="sub">${ESTADOS.filter((k) => v["qtd_" + k]).map((k) => v["qtd_" + k] + " " + ESTADO_NOME[k].toLowerCase()).join(", ")} · voltou para ${esc(nomeLocal(v.local_id))} · recebido por ${esc(v.recebido_por)}${v.obs ? " · " + esc(v.obs) : ""}</div></div></div>`).join("")}</div>` : `<div class="caixa msg">Nada voltou ainda.</div>`}
+    </div>
+    ${r.baixas.length ? `<div class="secao"><h3>Baixas do que não voltou</h3><div class="caixa">${r.baixas.map((x) => `<div class="linha"><div class="txt"><div class="tit">Nº ${x.numero} · ${x.quantidade} un. ${pillStatus(x.status)}</div><div class="sub">${esc(x.obs)} · ${esc(x.solicitado_por)} em ${fmtDataHora(x.solicitado_em)}${x.motivo_recusa ? " · recusada: " + esc(x.motivo_recusa) : ""}</div></div></div>`).join("")}</div></div>` : ""}`;
+  $("#voltar").onclick = (e) => { e.preventDefault(); lista(); };
+  if (!$("#boxDev")) return;
+  const loc = campoLocal($("#dLocal"), { valor: s.local_id });
+  const soma = () => { const t = ["#dN", "#dB", "#dR"].reduce((a, k) => a + (Number($(k).value) || 0), 0); $("#dSoma").textContent = `Voltando agora: ${t} · em aberto: ${ab}${t > ab ? " — mais do que está em aberto" : t ? ` · ficam ${ab - t} em aberto` : ""}.`; };
+  ["#dN", "#dB", "#dR"].forEach((k) => $(k).oninput = soma);
+  $("#dOk").onclick = async () => {
+    $("#dErro").textContent = "";
+    $("#dOk").disabled = true;
+    try {
+      await api(`/saidas/${id}/devolucao`, { body: { qtd_novo: $("#dN").value, qtd_bom: $("#dB").value, qtd_ruim: $("#dR").value, local_id: loc.value, data_devolucao: $("#dData").value, obs: $("#dObs").value } });
+      toast("Devolução registrada."); detalhe(id);
+    } catch (e) { $("#dErro").textContent = e.message; $("#dOk").disabled = false; }
+  };
+  $("#btNaoVolta").onclick = () => modal(`<h2>Pedir baixa do que não voltou</h2>
+    <p class="msg">${ab} un. em aberto. O pedido vai para o ADM validar; se for recusado, a quantidade volta a ficar em aberto aqui.</p>
+    <label>Quantidade</label><input id="nbQ" type="number" min="1" max="${ab}" value="${ab}">
+    <label>Observação <span class="obrig">*</span></label><textarea id="nbObs" rows="3" placeholder="Relate o motivo da baixa"></textarea>
+    <label>Foto <span class="opc">(se houver)</span></label><div id="nbFoto"></div>
+    <div class="erro" id="nbErro"></div>
+    <div class="acoes"><button class="bt-verm" id="nbOk">Pedir baixa</button><button class="bt-cinza" data-fechar>Cancelar</button></div>`, (d) => {
+    const f = campoArquivo($("#nbFoto", d), { texto: "Foto (opcional)" });
+    $("#nbOk", d).onclick = async () => {
+      try { await api(`/saidas/${id}/baixa`, { body: { quantidade: $("#nbQ", d).value, obs: $("#nbObs", d).value, foto: f.valor() } }); toast("Pedido de baixa enviado ao ADM."); d.close(); detalhe(id); }
+      catch (e) { $("#nbErro", d).textContent = e.message; }
+    };
+  });
+}
+</script>
+</body>
+</html>

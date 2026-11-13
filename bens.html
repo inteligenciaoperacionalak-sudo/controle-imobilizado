@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Consulta geral · Imobilizado</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="comum.css">
+</head>
+<body>
+<main class="larga">
+  <p class="msg">Carregando…</p>
+</main>
+<script src="comum.js"></script>
+<script src="xlsx.js"></script>
+<script>
+const SITUACOES = {
+  "": "Todas as situações", disponivel: "Com disponível", emprestado: "Emprestado", manutencao: "Em manutenção",
+  vencido: "Prazo de retorno vencido", nao_localizado: "Não localizado", baixa_pendente: "Baixa pendente", baixado: "Com baixa", sem_nf: "Aquisição sem nota fiscal",
+};
+let D = null;
+
+iniciar(async () => {
+  D = await carregarBens();
+  $("main").innerHTML = `
+    <div class="titulo"><div><h2>Consulta geral</h2><p>Tudo o que existe de imobilizado, onde está e em que situação. Clique no bem para ver a ficha completa.</p></div>
+      <div class="acoes nao-imprimir" style="margin:0">${pode("operador") ? `<a class="bt-mar" href="incluir.html" style="padding:11px 16px;border-radius:8px;text-decoration:none;font-weight:600">+ Incluir</a>` : ""}<button class="bt-cinza" id="btExcel">Exportar Excel</button><button class="bt-cinza" id="btImprimir">Imprimir</button></div></div>
+    <div class="filtro nao-imprimir">
+      <input type="search" id="fBusca" placeholder="Buscar por descrição ou código">
+    </div>
+    <div class="grade3 nao-imprimir" style="margin-bottom:12px">
+      <div><label>Unidade</label><select id="fUnidade"><option value="">CD e Cabana</option><option>CD</option><option>Cabana</option></select></div>
+      <div><label>Local</label><div id="fLocalBox"></div></div>
+      <div><label>Categoria</label><select id="fCat"><option value="">Todas</option>${BASE.categorias.map((c) => `<option value="${c.id}">${esc(c.nome)}</option>`).join("")}</select></div>
+      <div class="cheio"><label>Situação</label><select id="fSit">${Object.entries(SITUACOES).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select></div>
+    </div>
+    <div class="numeros" id="resumo"></div>
+    <div class="caixa rolar"><table class="tabela" id="tab"></table></div>`;
+  const selLocal = campoLocal($("#fLocalBox"), { permitirNovo: false, vazio: "Todos os locais" });
+  $("#fSit").value = param("sit") || "";
+  ["#fBusca", "#fUnidade", "#fCat", "#fSit"].forEach((s) => $(s).addEventListener("input", desenhar));
+  selLocal.addEventListener("change", desenhar);
+  $("#fUnidade").addEventListener("change", () => {
+    const u = $("#fUnidade").value;
+    const atual = selLocal.value;
+    const novo = campoLocal($("#fLocalBox"), { permitirNovo: false, vazio: "Todos os locais", unidade: u || null, valor: localPorId(atual)?.unidade === u || !u ? atual : "" });
+    novo.addEventListener("change", desenhar);
+    desenhar();
+  });
+  $("#btExcel").onclick = exportar;
+  $("#btImprimir").onclick = () => window.print();
+  desenhar();
+});
+
+// Quanto de cada bem está no filtro de unidade/local escolhido
+function filtrados() {
+  const t = normBusca($("#fBusca").value.trim());
+  const un = $("#fUnidade").value, loc = $("#fLocalBox select").value, cat = $("#fCat").value, sit = $("#fSit").value;
+  const noFiltro = (localId) => (!loc || localId === loc) && (!un || localPorId(localId)?.unidade === un);
+  const porLocal = !!(un || loc);
+  return D.bens.map((b) => {
+    if (!porLocal) return { ...b, disp: b.disponivel, emp: b.emprestado, man: b.manutencao, nl: b.nao_localizado };
+    const disp = D.saldos.filter((s) => s.bem_id === b.id && noFiltro(s.local_id)).reduce((a, s) => a + s.quantidade, 0);
+    const sd = D.saidas.filter((s) => s.bem_id === b.id && noFiltro(s.local_id));
+    const emp = sd.filter((s) => s.tipo === "emprestimo").reduce((a, s) => a + s.quantidade - s.qtd_devolvida - s.qtd_baixa, 0);
+    const man = sd.filter((s) => s.tipo === "manutencao").reduce((a, s) => a + s.quantidade - s.qtd_devolvida - s.qtd_baixa, 0);
+    const nl = D.nao_localizados.filter((s) => s.bem_id === b.id && noFiltro(s.local_id)).reduce((a, s) => a + s.quantidade, 0);
+    return { ...b, disp, emp, man, nl, _fora: !(disp || emp || man || nl) };
+  }).filter((b) => !b._fora)
+    .filter((b) => !t || normBusca(b.descricao + " " + b.codigo_sistema + " " + b.codigo_patrimonio + " " + b.categoria).includes(t))
+    .filter((b) => !cat || b.categoria_id === cat)
+    .filter((b) => {
+      switch (sit) {
+        case "disponivel": return b.disp > 0;
+        case "emprestado": return b.emp > 0;
+        case "manutencao": return b.man > 0;
+        case "vencido": return b.saidas_vencidas > 0;
+        case "nao_localizado": return b.nl > 0;
+        case "baixa_pendente": return b.baixa_pendente > 0;
+        case "baixado": return b.baixado > 0;
+        case "sem_nf": return b.entradas_sem_nf > 0;
+        default: return true;
+      }
+    });
+}
+
+function desenhar() {
+  const lista = filtrados();
+  const s = (k) => lista.reduce((a, b) => a + Number(b[k] || 0), 0);
+  $("#resumo").innerHTML = `
+    <div class="num"><b>${num(lista.length)}</b><span>bens</span></div>
+    <div class="num"><b>${num(s("disp"))}</b><span>disponíveis</span></div>
+    <div class="num"><b>${num(s("emp"))}</b><span>emprestadas</span></div>
+    <div class="num"><b>${num(s("man"))}</b><span>em manutenção</span></div>
+    <div class="num ${s("nl") ? "alerta" : ""}"><b>${num(s("nl"))}</b><span>não localizadas</span></div>
+    <div class="num"><b>${moeda(s("valor_total"))}</b><span>valor de aquisição</span></div>`;
+  if (!lista.length) { $("#tab").innerHTML = `<tr><td><div class="vazio"><b>Nenhum bem com esses filtros.</b>${D.bens.length ? "" : (pode("operador") ? `Comece em <a href="incluir.html">Incluir</a>.` : "")}</div></td></tr>`; return; }
+  $("#tab").innerHTML = `<thead><tr><th>Bem</th><th>Categoria</th><th class="n">Disponível</th><th class="n">Emprest.</th><th class="n">Manut.</th><th class="n">Não loc.</th><th class="n">Baixa pend.</th><th class="n">Baixado</th><th class="n">Valor aquis.</th></tr></thead>
+    <tbody>${lista.map((b) => `<tr class="clic" data-id="${b.id}">
+      <td><b>${esc(b.descricao)}</b><div class="msg" style="margin:2px 0 0">Patrim. ${esc(b.codigo_patrimonio || "—")} · Sist. ${esc(b.codigo_sistema || "—")}${b.entradas_sem_nf ? ` · <span class="pill pendente">sem NF</span>` : ""}${b.saidas_vencidas ? ` · <span class="pill vencido">prazo vencido</span>` : ""}</div></td>
+      <td>${esc(b.categoria || "—")}</td>
+      <td class="n"><b>${num(b.disp)}</b>${!$("#fUnidade").value && !$("#fLocalBox select").value && b.disp ? `<div class="msg" style="margin:0;font-size:12px">${b.disp_novo ? b.disp_novo + " novo " : ""}${b.disp_bom ? b.disp_bom + " bom " : ""}${b.disp_ruim ? b.disp_ruim + " ruim" : ""}</div>` : ""}</td>
+      <td class="n">${b.emp || ""}</td><td class="n">${b.man || ""}</td>
+      <td class="n">${b.nl ? `<b class="dif falta">${b.nl}</b>` : ""}</td>
+      <td class="n">${b.baixa_pendente || ""}</td><td class="n">${b.baixado || ""}</td>
+      <td class="n">${moeda(b.valor_total)}</td></tr>`).join("")}</tbody>
+    <tfoot><tr><td colspan="2">Total</td><td class="n">${num(s("disp"))}</td><td class="n">${num(s("emp"))}</td><td class="n">${num(s("man"))}</td><td class="n">${num(s("nl"))}</td><td class="n">${num(s("baixa_pendente"))}</td><td class="n">${num(s("baixado"))}</td><td class="n">${moeda(s("valor_total"))}</td></tr></tfoot>`;
+  $$("#tab tr[data-id]").forEach((tr) => tr.onclick = () => location.href = "bem.html?id=" + tr.dataset.id);
+}
+
+function exportar() {
+  const lista = filtrados();
+  const ids = new Set(lista.map((b) => b.id));
+  const bens = [["Descrição", "Cód. patrimônio", "Cód. sistema", "Categoria", "Disponível", "Novo", "Bom", "Ruim", "Emprestado", "Em manutenção", "Não localizado", "Baixa pendente", "Baixado", "Total adquirido", "Valor de aquisição (R$)", "Última aquisição", "Aquisições sem NF"]];
+  lista.forEach((b) => bens.push([b.descricao, b.codigo_patrimonio, b.codigo_sistema, b.categoria, b.disp, b.disp_novo, b.disp_bom, b.disp_ruim, b.emp, b.man, b.nl, b.baixa_pendente, b.baixado, b.adquirido, Number(b.valor_total || 0), fmtData(b.ultima_aquisicao), b.entradas_sem_nf]));
+  const onde = [["Descrição", "Cód. patrimônio", "Unidade", "Local", "Estado", "Quantidade"]];
+  D.saldos.filter((s) => ids.has(s.bem_id)).forEach((s) => { const b = D.bens.find((x) => x.id === s.bem_id); const l = localPorId(s.local_id); onde.push([b.descricao, b.codigo_patrimonio, l?.unidade, l?.nome, ESTADO_NOME[s.estado], s.quantidade]); });
+  D.nao_localizados.filter((s) => ids.has(s.bem_id)).forEach((s) => { const b = D.bens.find((x) => x.id === s.bem_id); const l = localPorId(s.local_id); onde.push([b.descricao, b.codigo_patrimonio, l?.unidade, l?.nome, "Não localizado", s.quantidade]); });
+  gerarXlsx("imobilizado-" + BASE.hoje + ".xlsx", [{ nome: "Bens", linhas: bens }, { nome: "Onde está", linhas: onde }]);
+}
+</script>
+</body>
+</html>

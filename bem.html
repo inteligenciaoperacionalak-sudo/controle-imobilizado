@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ficha do bem · Imobilizado</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="comum.css">
+</head>
+<body>
+<main class="larga">
+  <p class="msg">Carregando…</p>
+</main>
+<script src="comum.js"></script>
+<script>
+const ID = param("id");
+let F = null;
+
+iniciar(carregar);
+
+async function carregar() {
+  if (!ID) { $("main").innerHTML = `<div class="vazio"><b>Bem não informado.</b><a href="bens.html">Voltar à consulta</a></div>`; return; }
+  F = await api("/bens/" + ID);
+  const b = F.bem, r = F.resumo;
+  const ativo = r.disponivel + r.emprestado + r.manutencao + r.nao_localizado + r.baixa_pendente;
+  // onde está: local × estado
+  const locais = [...new Set([...F.saldos.map((s) => s.local_id), ...F.nao_localizados.map((s) => s.local_id)])]
+    .sort((a, c) => nomeLocal(a).localeCompare(nomeLocal(c)));
+  const q = (l, e) => F.saldos.find((s) => s.local_id === l && s.estado === e)?.quantidade || 0;
+  const nl = (l) => F.nao_localizados.find((s) => s.local_id === l)?.quantidade || 0;
+  const vidaAte = (e) => { if (!e.vida_util_anos) return ""; const d = new Date(e.data_aquisicao + "T12:00:00Z"); d.setUTCMonth(d.getUTCMonth() + Math.round(e.vida_util_anos * 12)); return d.toISOString().slice(0, 10); };
+  const abertas = F.saidas.filter((s) => s.status === "aberta");
+
+  $("main").innerHTML = `
+    <p class="nao-imprimir" style="margin-bottom:10px"><a href="bens.html">← Consulta geral</a></p>
+    <div class="ficha-topo">
+      ${b.foto_url ? `<img src="${esc(b.foto_url)}" alt="Foto do bem" id="foto">` : ""}
+      <div style="flex:1;min-width:0">
+        <h2>${esc(b.descricao)}</h2>
+        <div class="codigos"><span class="codigo">Patrimônio ${esc(b.codigo_patrimonio || "—")}</span><span class="codigo">Sistema ${esc(b.codigo_sistema || "—")}</span><span class="pill cat">${esc(r.categoria || "Sem categoria")}</span></div>
+        <p class="msg">Cadastrado em ${fmtDataHora(b.criado_em)} por ${esc(b.criado_por)}${b.atualizado_em ? ` · editado em ${fmtDataHora(b.atualizado_em)} por ${esc(b.atualizado_por)}` : ""}</p>
+      </div>
+    </div>
+    <div class="acoes nao-imprimir">
+      ${pode("operador") ? `<a class="bt-mar" style="padding:11px 16px;border-radius:8px;text-decoration:none;font-weight:600" href="incluir.html?bem=${ID}">+ Incluir quantidade</a>
+        <a class="bt-cinza" style="padding:11px 16px;border-radius:8px;text-decoration:none;font-weight:600" href="retirar.html?tipo=emprestimo&bem=${ID}">Emprestar</a>
+        <a class="bt-cinza" style="padding:11px 16px;border-radius:8px;text-decoration:none;font-weight:600" href="retirar.html?tipo=manutencao&bem=${ID}">Manutenção</a>
+        <a class="bt-cinza" style="padding:11px 16px;border-radius:8px;text-decoration:none;font-weight:600" href="transferir.html?bem=${ID}">Transferir</a>
+        <a class="bt-verm" style="padding:11px 16px;border-radius:8px;text-decoration:none;font-weight:600" href="retirar.html?tipo=baixa&bem=${ID}">Pedir baixa</a>` : ""}
+      ${ehAdmin() ? `<button class="bt-cinza" id="btEditar">Editar dados</button>` : ""}
+      <button class="bt-link" onclick="window.print()">Imprimir ficha</button>
+    </div>
+
+    <div class="secao"><h3>Situação</h3>
+      <div class="numeros">
+        <div class="num ok"><b>${num(r.disponivel)}</b><span>disponíveis</span></div>
+        <div class="num ${r.emprestado ? "aviso" : ""}"><b>${num(r.emprestado)}</b><span>emprestadas</span></div>
+        <div class="num ${r.manutencao ? "aviso" : ""}"><b>${num(r.manutencao)}</b><span>em manutenção</span></div>
+        <div class="num ${r.nao_localizado ? "alerta" : ""}"><b>${num(r.nao_localizado)}</b><span>não localizadas</span></div>
+        <div class="num"><b>${num(r.baixa_pendente)}</b><span>baixa pendente</span></div>
+        <div class="num"><b>${num(r.baixado)}</b><span>baixadas</span></div>
+        <div class="num"><b>${num(ativo)}</b><span>no imobilizado (de ${num(r.adquirido)} adquiridas)</span></div>
+        <div class="num"><b>${moeda(r.valor_total)}</b><span>valor de aquisição</span></div>
+      </div>
+    </div>
+
+    <div class="secao"><h3>Onde está o que está disponível</h3>
+      ${locais.length ? `<div class="caixa rolar"><table class="tabela"><thead><tr><th>Local</th><th class="n">Novo</th><th class="n">Bom</th><th class="n">Ruim</th><th class="n">Total</th><th class="n">Não localizado</th><th class="nao-imprimir"></th></tr></thead><tbody>
+        ${locais.map((l) => `<tr><td>${esc(nomeLocal(l))}</td><td class="n">${q(l, "novo") || ""}</td><td class="n">${q(l, "bom") || ""}</td><td class="n">${q(l, "ruim") || ""}</td><td class="n"><b>${q(l, "novo") + q(l, "bom") + q(l, "ruim")}</b></td>
+          <td class="n">${nl(l) ? `<b class="dif falta">${nl(l)}</b>` : ""}</td>
+          <td class="nao-imprimir">${nl(l) && pode("operador", "conferente") ? `<button class="bt-mini bt-verde" data-achei="${l}">Achei</button>` : ""} ${nl(l) && pode("operador") ? `<button class="bt-mini bt-verm" data-baixanl="${l}">Pedir baixa</button>` : ""}</td></tr>`).join("")}
+      </tbody></table></div>` : `<div class="caixa msg">Nenhuma unidade disponível em nenhum local.</div>`}
+    </div>
+
+    <div class="secao"><h3>Aquisições (cada época separada)</h3>
+      ${F.entradas.map((e) => `<div class="epoca">
+        <div class="cab"><b>${num(e.quantidade)} un. · ${fmtData(e.data_aquisicao)}</b><span class="msg" style="margin:0">Aquisição nº ${e.numero} · entrou ${pillEstado(e.estado)} em ${esc(nomeLocal(e.local_id))}</span></div>
+        <div class="dados">
+          <div><span>Fornecedor</span>${esc(e.fornecedor || "—")}</div>
+          <div><span>Valor unitário</span>${moeda(e.valor_unitario) || "—"}</div>
+          <div><span>Valor total</span>${e.valor_unitario !== null ? moeda(e.valor_unitario * e.quantidade) : "—"}</div>
+          <div><span>Nota fiscal</span>${e.nf_url ? `<a href="${esc(e.nf_url)}" target="_blank" rel="noopener">Abrir nota</a>` : `<span class="pill pendente" style="display:inline-block">sem nota fiscal</span>`}</div>
+          <div><span>Garantia até</span>${e.garantia_ate ? fmtData(e.garantia_ate) + (e.garantia_ate < BASE.hoje ? " (vencida)" : "") : "—"}</div>
+          <div><span>Prazo de vida</span>${e.vida_util_anos ? `${String(e.vida_util_anos).replace(".", ",")} ano(s) · até ${fmtData(vidaAte(e))}` : "—"}</div>
+        </div>
+        ${e.obs ? `<p class="msg" style="margin-top:8px">${esc(e.obs)}</p>` : ""}
+        <p class="msg" style="margin-top:6px;font-size:12px">Lançado por ${esc(e.criado_por)} em ${fmtDataHora(e.criado_em)}${e.atualizado_em ? ` · editado por ${esc(e.atualizado_por)} em ${fmtDataHora(e.atualizado_em)}` : ""}</p>
+        ${ehAdmin() ? `<button class="bt-mini bt-cinza nao-imprimir" data-editar-entrada="${e.id}">Editar dados da aquisição</button>` : ""}
+      </div>`).join("")}
+    </div>
+
+    <div class="secao"><h3>Empréstimos e manutenções ${abertas.length ? `<span class="pill pendente">${abertas.length} em aberto</span>` : ""}</h3>
+      ${F.saidas.length ? `<div class="caixa">${F.saidas.map((s) => { const ab = s.quantidade - s.qtd_devolvida - s.qtd_baixa; return `<a class="linha clic" href="emprestimos.html?id=${s.id}" style="text-decoration:none;color:inherit"><div class="txt"><div class="tit">${TIPO_SAIDA[s.tipo]} nº ${s.numero} · ${s.quantidade} un. ${ESTADO_NOME[s.estado].toLowerCase()}</div><div class="sub">${esc(s.tipo === "emprestimo" ? s.solicitado_por : s.empresa)} · saiu ${fmtData(s.data_saida)} de ${esc(nomeLocal(s.local_id))} · voltaram ${s.qtd_devolvida}${s.qtd_baixa ? ` · baixa ${s.qtd_baixa}` : ""}</div></div>${s.status === "aberta" ? `${ab} em aberto ${prazoTexto(s.prazo_retorno)}` : pillStatus(s.status)}</a>`; }).join("")}</div>` : `<div class="caixa msg">Nunca saiu.</div>`}
+    </div>
+
+    <div class="secao"><h3>Baixas</h3>
+      ${F.baixas.length ? `<div class="caixa">${F.baixas.map((x) => `<div class="linha"><div class="txt"><div class="tit">Nº ${x.numero} · ${x.quantidade} un. ${pillStatus(x.status)}</div><div class="sub">${esc(x.obs)} · pedida por ${esc(x.solicitado_por)} em ${fmtDataHora(x.solicitado_em)}${x.validado_por ? ` · ${x.status === "aprovada" ? "aprovada" : "recusada"} por ${esc(x.validado_por)}` : ""}${x.motivo_recusa ? " — " + esc(x.motivo_recusa) : ""}</div></div>${x.foto_url ? `<img class="foto-mini" src="${esc(x.foto_url)}" alt="Foto da baixa" data-foto="${esc(x.foto_url)}">` : ""}</div>`).join("")}</div>` : `<div class="caixa msg">Nenhuma baixa.</div>`}
+    </div>
+
+    <div class="secao"><h3>Histórico completo</h3><div class="caixa">${listaHistorico(F.movimentos)}</div></div>`;
+
+  if ($("#foto")) $("#foto").onclick = () => verImagem(b.foto_url, b.descricao);
+  $$("[data-foto]").forEach((i) => i.onclick = () => verImagem(i.dataset.foto, "Foto da baixa"));
+  if ($("#btEditar")) $("#btEditar").onclick = editarBem;
+  $$("[data-editar-entrada]").forEach((bt) => bt.onclick = () => editarEntrada(F.entradas.find((e) => e.id === bt.dataset.editarEntrada)));
+  $$("[data-achei]").forEach((bt) => bt.onclick = () => achei(bt.dataset.achei, nl(bt.dataset.achei)));
+  $$("[data-baixanl]").forEach((bt) => bt.onclick = () => baixaNaoLocalizado(bt.dataset.baixanl, nl(bt.dataset.baixanl)));
+}
+
+function editarBem() {
+  const b = F.bem;
+  modal(`<h2>Editar dados do bem</h2>
+    <p class="msg">Quantidade, local e estado não se editam aqui: só mudam por movimentação. Tudo o que mudar fica registrado (antes → depois).</p>
+    <label>Descrição</label><input id="eDesc" type="text" value="${esc(b.descricao)}">
+    <div class="grade2"><div><label>Cód. do produto no sistema</label><input id="eSis" type="text" value="${esc(b.codigo_sistema || "")}"></div>
+    <div><label>Cód. de patrimônio</label><input id="ePat" type="text" value="${esc(b.codigo_patrimonio || "")}"></div></div>
+    <label>Categoria</label><div id="eCat"></div>
+    <label>Trocar a foto <span class="opc">(opcional)</span></label><div id="eFoto"></div>
+    <div class="erro" id="eErro"></div>
+    <div class="acoes"><button class="bt-mar" id="eOk">Salvar</button><button class="bt-cinza" data-fechar>Cancelar</button></div>`, (d) => {
+    const cat = campoCategoria($("#eCat", d), b.categoria_id || "");
+    const foto = campoArquivo($("#eFoto", d), { texto: "Escolher foto nova", captura: false });
+    $("#eOk", d).onclick = async () => {
+      $("#eOk", d).disabled = true;
+      try {
+        const r = await api(`/bens/${ID}/editar`, { body: { descricao: $("#eDesc", d).value, codigo_sistema: $("#eSis", d).value, codigo_patrimonio: $("#ePat", d).value, categoria_id: cat.value, foto: foto.valor() } });
+        toast(r.nada ? "Nada mudou." : "Dados salvos."); d.close(); carregar();
+      } catch (e) { $("#eErro", d).textContent = e.message; $("#eOk", d).disabled = false; }
+    };
+  });
+}
+function editarEntrada(e) {
+  modal(`<h2>Editar aquisição nº ${e.numero}</h2>
+    <p class="msg">${e.quantidade} un. — a quantidade, o local e o estado de entrada não mudam aqui.</p>
+    <div class="grade2">
+      <div><label>Data de aquisição</label><input id="aData" type="date" value="${e.data_aquisicao}" max="${BASE.hoje}"></div>
+      <div><label>Valor unitário (R$)</label><input id="aValor" type="text" inputmode="decimal" value="${e.valor_unitario !== null ? String(e.valor_unitario).replace(".", ",") : ""}"></div>
+      <div class="cheio"><label>Fornecedor</label><input id="aForn" type="text" value="${esc(e.fornecedor || "")}"></div>
+      <div><label>Garantia até</label><input id="aGar" type="date" value="${e.garantia_ate || ""}"></div>
+      <div><label>Prazo de vida (anos)</label><input id="aVida" type="text" inputmode="decimal" value="${e.vida_util_anos !== null ? String(e.vida_util_anos).replace(".", ",") : ""}"></div>
+    </div>
+    <label>${e.nf_path ? "Trocar a nota fiscal" : "Anexar a nota fiscal"} <span class="opc">(PDF ou foto)</span></label><div id="aNf"></div>
+    <label>Observação</label><textarea id="aObs" rows="2">${esc(e.obs || "")}</textarea>
+    <div class="erro" id="aErro"></div>
+    <div class="acoes"><button class="bt-mar" id="aOk">Salvar</button><button class="bt-cinza" data-fechar>Cancelar</button></div>`, (d) => {
+    const nf = campoArquivo($("#aNf", d), { tipo: "nf", texto: "Escolher PDF ou foto da nota" });
+    $("#aOk", d).onclick = async () => {
+      $("#aOk", d).disabled = true;
+      try {
+        const r = await api(`/entradas/${e.id}/editar`, { body: { data_aquisicao: $("#aData", d).value, valor_unitario: $("#aValor", d).value, fornecedor: $("#aForn", d).value, garantia_ate: $("#aGar", d).value, vida_util_anos: $("#aVida", d).value, obs: $("#aObs", d).value, nf: nf.valor() } });
+        toast(r.nada ? "Nada mudou." : "Aquisição atualizada."); d.close(); carregar();
+      } catch (er) { $("#aErro", d).textContent = er.message; $("#aOk", d).disabled = false; }
+    };
+  });
+}
+function achei(localId, max) {
+  modal(`<h2>Achei o que estava não localizado</h2>
+    <p class="msg">${max} un. não localizada(s) em ${esc(nomeLocal(localId))} na última conferência.</p>
+    <div class="grade2"><div><label>Quantidade achada</label><input id="lQ" type="number" min="1" max="${max}" value="${max}"></div>
+    <div><label>Estado</label><select id="lE">${ESTADOS.map((x) => `<option value="${x}" ${x === "bom" ? "selected" : ""}>${ESTADO_NOME[x]}</option>`).join("")}</select></div></div>
+    <label>Onde foi achado</label><div id="lLocal"></div>
+    <label>Observação</label><input id="lObs" type="text" placeholder="Ex.: estava no depósito do bar">
+    <div class="erro" id="lErro"></div>
+    <div class="acoes"><button class="bt-verde" id="lOk">Registrar</button><button class="bt-cinza" data-fechar>Cancelar</button></div>`, (d) => {
+    const sel = campoLocal($("#lLocal", d), { valor: localId });
+    $("#lOk", d).onclick = async () => {
+      try {
+        await api("/localizar", { body: { bem_id: ID, local_id: localId, local_destino_id: sel.value, estado: $("#lE", d).value, quantidade: $("#lQ", d).value, obs: $("#lObs", d).value } });
+        toast("Registrado: voltou para o disponível."); d.close(); carregar();
+      } catch (e) { $("#lErro", d).textContent = e.message; }
+    };
+  });
+}
+function baixaNaoLocalizado(localId, max) {
+  modal(`<h2>Pedir baixa do não localizado</h2>
+    <p class="msg">${max} un. não localizada(s) em ${esc(nomeLocal(localId))}. O pedido vai para o ADM validar.</p>
+    <label>Quantidade</label><input id="bQ" type="number" min="1" max="${max}" value="${max}">
+    <label>Observação <span class="obrig">*</span></label><textarea id="bObs" rows="3" placeholder="Relate o motivo da baixa"></textarea>
+    <div class="erro" id="bErro"></div>
+    <div class="acoes"><button class="bt-verm" id="bOk">Pedir baixa</button><button class="bt-cinza" data-fechar>Cancelar</button></div>`, (d) => {
+    $("#bOk", d).onclick = async () => {
+      try {
+        await api("/baixas", { body: { origem: "nao_localizado", bem_id: ID, local_id: localId, quantidade: $("#bQ", d).value, obs: $("#bObs", d).value } });
+        toast("Pedido de baixa enviado ao ADM."); d.close(); carregar();
+      } catch (e) { $("#bErro", d).textContent = e.message; }
+    };
+  });
+}
+</script>
+</body>
+</html>

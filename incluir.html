@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Incluir · Imobilizado</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="comum.css">
+</head>
+<body>
+<main>
+  <p class="msg">Carregando…</p>
+</main>
+<script src="comum.js"></script>
+<script>
+let MODO = param("bem") ? "existente" : "novo", BEM = null, cat = null, foto = null, nf = null, local = null;
+
+iniciar(async () => {
+  await carregarBens();
+  $("main").innerHTML = `
+    <div class="titulo"><div><h2>Incluir</h2><p>Bem novo vai para o cadastro. Mais unidades de um bem que já existe entram como uma nova aquisição, separada das anteriores.</p></div></div>
+    <form id="f" novalidate>
+      <div class="opcoes" role="radiogroup" aria-label="O que vai incluir">
+        <label class="opcao" data-modo="novo"><input type="radio" name="modo" value="novo">Bem novo</label>
+        <label class="opcao" data-modo="existente"><input type="radio" name="modo" value="existente">Bem já cadastrado</label>
+      </div>
+
+      <div id="blNovo">
+        <div class="form-tit" style="margin-top:22px;padding-top:14px;border-top:1px solid var(--linha)">Cadastro do bem</div>
+        <label for="iDesc">Descrição <span class="obrig">*</span></label><input id="iDesc" type="text" placeholder="Ex.: Cadeira plástica branca com braço">
+        <div class="grade2">
+          <div><label for="iSis">Cód. do produto no sistema <span class="obrig">*</span></label><input id="iSis" type="text"></div>
+          <div><label for="iPat">Cód. de patrimônio <span class="obrig">*</span></label><input id="iPat" type="text" autocapitalize="characters"></div>
+        </div>
+        <label>Categoria <span class="obrig">*</span> <span class="opc">— o + cria uma nova</span></label><div id="iCat"></div>
+        <label>Foto do bem <span class="opc">(opcional)</span></label><div id="iFoto"></div>
+      </div>
+
+      <div id="blExistente">
+        <div class="form-tit" style="margin-top:22px;padding-top:14px;border-top:1px solid var(--linha)">Qual bem</div>
+        <div id="iBem" style="margin-top:8px"></div>
+        <p class="dica" id="iBemInfo"></p>
+      </div>
+
+      <div class="form-tit">Aquisição</div>
+      <div class="grade2">
+        <div><label for="iQtd">Quantidade (unidades) <span class="obrig">*</span></label><input id="iQtd" type="number" min="1" inputmode="numeric"></div>
+        <div><label for="iData">Data de aquisição <span class="obrig">*</span></label><input id="iData" type="date"></div>
+      </div>
+      <label>Local onde vai ficar <span class="obrig">*</span> <span class="opc">— o + cria um local novo</span></label><div id="iLocal"></div>
+      <label>Estado de conservação <span class="obrig">*</span></label>
+      <div class="opcoes" id="iEstado" style="grid-template-columns:repeat(3,1fr)">${ESTADOS.map((e) => `<label class="opcao" data-estado="${e}"><input type="radio" name="estado" value="${e}">${ESTADO_NOME[e]}</label>`).join("")}</div>
+
+      <label class="check"><input type="checkbox" id="iSemNf"> Bem antigo sem nota fiscal</label>
+      <div id="blComNf">
+        <div class="grade2">
+          <div><label for="iForn">Fornecedor <span class="obrig">*</span></label><input id="iForn" type="text"></div>
+          <div><label for="iValor">Valor unitário (R$) <span class="obrig">*</span></label><input id="iValor" type="text" inputmode="decimal" placeholder="0,00"></div>
+        </div>
+        <label>Nota fiscal <span class="obrig">*</span> <span class="opc">(PDF ou foto)</span></label><div id="iNf"></div>
+      </div>
+      <div id="blSemNf" hidden>
+        <label for="iSemNfObs">Por que não tem nota? <span class="obrig">*</span></label><input id="iSemNfObs" type="text" placeholder="Ex.: comprado em 2019, nota não encontrada">
+        <div class="grade2">
+          <div><label for="iForn2">Fornecedor <span class="opc">(se souber)</span></label><input id="iForn2" type="text"></div>
+          <div><label for="iValor2">Valor unitário (R$) <span class="opc">(se souber)</span></label><input id="iValor2" type="text" inputmode="decimal" placeholder="0,00"></div>
+        </div>
+      </div>
+      <div class="grade2">
+        <div><label for="iGar">Garantia do fornecedor até <span class="opc">(opcional)</span></label><input id="iGar" type="date"></div>
+        <div><label for="iVida">Prazo de vida em anos <span class="opc">(opcional)</span></label><input id="iVida" type="text" inputmode="decimal" placeholder="Ex.: 5"></div>
+      </div>
+      <label for="iObs">Observação <span class="opc">(opcional)</span></label><textarea id="iObs" rows="2"></textarea>
+      <div class="erro" id="iErro"></div>
+      <button class="bt-mar bt-grande" type="submit" id="iOk">Incluir</button>
+    </form>`;
+  $("#iData").value = BASE.hoje; $("#iData").max = BASE.hoje;
+  cat = campoCategoria($("#iCat"));
+  foto = campoArquivo($("#iFoto"), { texto: "Tirar ou escolher foto" });
+  nf = campoArquivo($("#iNf"), { tipo: "nf", texto: "Anexar PDF ou foto da nota" });
+  local = campoLocal($("#iLocal"));
+  $$("[data-modo]").forEach((o) => o.onclick = () => modo(o.dataset.modo));
+  $$("[data-estado]").forEach((o) => o.onclick = () => { $$("[data-estado]").forEach((x) => x.classList.toggle("on", x === o)); $("input", o).checked = true; });
+  $('[data-estado="novo"]').click();
+  $("#iSemNf").onchange = () => { $("#blComNf").hidden = $("#iSemNf").checked; $("#blSemNf").hidden = !$("#iSemNf").checked; };
+  await campoBem($("#iBem"), (b) => {
+    BEM = b;
+    $("#iBemInfo").textContent = b ? `Hoje: ${b.disponivel} disponíve${b.disponivel === 1 ? "l" : "is"}, ${b.adquirido} adquirida(s) em aquisições anteriores. Esta entrada fica separada como uma nova aquisição.` : "";
+  }, { bemId: param("bem") });
+  modo(MODO);
+  $("#f").onsubmit = enviar;
+});
+
+function modo(m) {
+  MODO = m;
+  $$("[data-modo]").forEach((x) => x.classList.toggle("on", x.dataset.modo === m));
+  $("#blNovo").hidden = m !== "novo";
+  $("#blExistente").hidden = m !== "existente";
+  $("#iOk").textContent = m === "novo" ? "Cadastrar e incluir" : "Incluir quantidade";
+}
+
+async function enviar(e) {
+  e.preventDefault();
+  $("#iErro").textContent = "";
+  const semNf = $("#iSemNf").checked;
+  const corpo = {
+    quantidade: $("#iQtd").value, data_aquisicao: $("#iData").value, local_id: local.value,
+    estado: $('input[name="estado"]:checked')?.value, sem_nf: semNf,
+    fornecedor: semNf ? $("#iForn2").value : $("#iForn").value, valor_unitario: semNf ? $("#iValor2").value : $("#iValor").value,
+    nf: semNf ? null : nf.valor(), sem_nf_obs: $("#iSemNfObs").value,
+    garantia_ate: $("#iGar").value, vida_util_anos: $("#iVida").value, obs: $("#iObs").value,
+  };
+  let rota = "/bens";
+  if (MODO === "novo") Object.assign(corpo, { descricao: $("#iDesc").value, codigo_sistema: $("#iSis").value, codigo_patrimonio: $("#iPat").value, categoria_id: cat.value, foto: foto.valor() });
+  else { if (!BEM) { $("#iErro").textContent = "Escolha o bem."; return; } rota = `/bens/${BEM.id}/entrada`; }
+  const bt = $("#iOk"); bt.disabled = true; bt.textContent = "Salvando…";
+  try {
+    const r = await api(rota, { body: corpo });
+    _bensCache = null;
+    $("main").innerHTML = `<div class="resultado ok"><div class="ic">✓</div><h2>${MODO === "novo" ? "Bem cadastrado" : "Quantidade incluída"}</h2>
+      <p>${esc(corpo.quantidade)} unidade(s) ${ESTADO_NOME[corpo.estado].toLowerCase()} em ${esc(nomeLocal(corpo.local_id))} · aquisição nº ${r.numero}.</p>
+      <a class="bt-mar bt-grande" style="display:block;text-decoration:none;margin-top:16px" href="bem.html?id=${r.bem_id}">Ver a ficha do bem</a>
+      <a class="link" href="incluir.html" style="display:inline-block">Incluir outro</a></div>`;
+  } catch (er) { $("#iErro").textContent = er.message; bt.disabled = false; modo(MODO); }
+}
+</script>
+</body>
+</html>

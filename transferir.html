@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Transferir · Imobilizado</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="comum.css">
+</head>
+<body>
+<main>
+  <p class="msg">Carregando…</p>
+</main>
+<script src="comum.js"></script>
+<script>
+let BEM = null, D = null, destino = null;
+
+iniciar(async () => {
+  D = await carregarBens();
+  $("main").innerHTML = `
+    <div class="titulo"><div><h2>Transferir</h2><p>Mudar unidades de um local para outro — entre setores ou entre CD e Cabana.</p></div></div>
+    <form id="f" novalidate>
+      <label>Bem <span class="obrig">*</span></label><div id="tBem"></div>
+      <div class="grade2">
+        <div><label for="tDe">De onde sai (local e estado) <span class="obrig">*</span></label><select id="tDe"><option value="">Escolha o bem primeiro</option></select></div>
+        <div><label for="tQtd">Quantidade <span class="obrig">*</span></label><input id="tQtd" type="number" min="1" inputmode="numeric"></div>
+      </div>
+      <label>Para onde vai <span class="obrig">*</span></label><div id="tPara"></div>
+      <label for="tLevou">Quem levou <span class="obrig">*</span></label><input id="tLevou" type="text">
+      <label for="tObs">Observação</label><textarea id="tObs" rows="2"></textarea>
+      <div class="erro" id="tErro"></div>
+      <button class="bt-mar bt-grande" type="submit" id="tOk">Transferir</button>
+    </form>`;
+  destino = campoLocal($("#tPara"), { vazio: "Escolha o destino" });
+  await campoBem($("#tBem"), (b) => {
+    BEM = b;
+    const ops = b ? opcoesSaldo(b.id, D) : [];
+    $("#tDe").innerHTML = !b ? `<option value="">Escolha o bem primeiro</option>` : ops.length
+      ? (ops.length > 1 ? `<option value="">Escolha</option>` : "") + ops.map((o) => `<option value="${o.valor}" data-qtd="${o.qtd}">${esc(o.texto)}</option>`).join("")
+      : `<option value="">Sem unidades disponíveis</option>`;
+    $("#tDe").dispatchEvent(new Event("change"));
+  }, { bemId: param("bem") });
+  $("#tDe").onchange = () => { const o = $("#tDe").selectedOptions[0]; $("#tQtd").max = o?.dataset.qtd || ""; };
+  $("#f").onsubmit = async (e) => {
+    e.preventDefault(); $("#tErro").textContent = "";
+    if (!BEM) { $("#tErro").textContent = "Escolha o bem."; return; }
+    const [de, estado] = ($("#tDe").value || "|").split("|");
+    const corpo = { bem_id: BEM.id, local_origem_id: de, local_destino_id: destino.value, estado, quantidade: $("#tQtd").value, levado_por: $("#tLevou").value, obs: $("#tObs").value };
+    const bt = $("#tOk"); bt.disabled = true;
+    try {
+      await api("/transferencias", { body: corpo });
+      _bensCache = null;
+      $("main").innerHTML = `<div class="resultado ok"><div class="ic">✓</div><h2>Transferência registrada</h2>
+        <p>${esc(corpo.quantidade)} un. de ${esc(BEM.descricao)}: ${esc(nomeLocal(de))} → ${esc(nomeLocal(corpo.local_destino_id))}.</p>
+        <a class="bt-mar bt-grande" style="display:block;text-decoration:none" href="bem.html?id=${BEM.id}">Ver a ficha do bem</a>
+        <a class="link" href="transferir.html" style="display:inline-block">Transferir outro</a></div>`;
+    } catch (er) { $("#tErro").textContent = er.message; bt.disabled = false; }
+  };
+});
+</script>
+</body>
+</html>
