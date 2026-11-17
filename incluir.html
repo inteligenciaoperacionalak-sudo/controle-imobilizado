@@ -14,39 +14,48 @@
 </main>
 <script src="comum.js"></script>
 <script>
-let MODO = param("bem") ? "existente" : "novo", BEM = null, cat = null, foto = null, nf = null, local = null;
-let RASC = null;        // inclusão em aberto que está sendo continuada
-let RASCUNHOS = [];
+// Três formas de incluir: bem novo, bem já cadastrado, por nota fiscal (vários itens de uma vez).
+// Pendentes (cadastros e notas em aberto) ficam recolhidos num botão no topo.
+let MODO = param("bem") ? "existente" : (param("modo") === "nota" ? "nota" : "novo");
+let BEM = null, cat = null, foto = null, nf = null, local = null;
+let RASC = null, RASCUNHOS = [], NOTAS = [];
+// nota fiscal com itens
+let NOTA = null;             // nota pendente sendo continuada
+let ITENS = [];              // itens da nota em edição (objetos com os campos digitados)
+let nLocal = null, nNf = null;
 
 iniciar(async () => {
   await carregarBens();
   $("main").innerHTML = `
-    <div class="titulo"><div><h2>Incluir</h2><p>Bem novo vai para o cadastro. Mais unidades de um bem que já existe entram como uma nova aquisição, separada das anteriores.</p></div></div>
-    <div id="abertas"></div>
+    <div class="titulo"><div><h2>Incluir</h2><p>Bem novo vai para o cadastro. Mais unidades de um bem que já existe entram como uma nova aquisição. Uma nota com vários itens é lançada uma vez só.</p></div></div>
+    <div class="pendentes" id="pendentes" hidden>
+      <button type="button" id="btPend"><span>Pendentes</span><span class="n" id="nPend">0</span><span class="msg" style="margin:0;font-weight:500">cadastros e notas guardados para concluir depois</span><span class="seta">▾</span></button>
+      <div class="lista" id="listaPend"></div>
+    </div>
     <div class="nota" id="continuando" hidden></div>
-    <form id="f" novalidate>
-      <div class="opcoes" role="radiogroup" aria-label="O que vai incluir">
-        <label class="opcao" data-modo="novo"><input type="radio" name="modo" value="novo">Bem novo</label>
-        <label class="opcao" data-modo="existente"><input type="radio" name="modo" value="existente">Bem já cadastrado</label>
-      </div>
+    <div class="opcoes" role="radiogroup" aria-label="O que vai incluir" style="grid-template-columns:repeat(3,1fr)">
+      <label class="opcao" data-modo="novo"><input type="radio" name="modo" value="novo">Bem novo</label>
+      <label class="opcao" data-modo="existente"><input type="radio" name="modo" value="existente">Bem já cadastrado</label>
+      <label class="opcao" data-modo="nota"><input type="radio" name="modo" value="nota">Por nota fiscal</label>
+    </div>
 
+    <!-- ===================== bem novo / já cadastrado ===================== -->
+    <form id="f" novalidate>
       <div id="blNovo">
         <div class="form-tit">Cadastro do bem</div>
         <label for="iDesc">Descrição <span class="obrig">*</span></label><input id="iDesc" type="text" placeholder="Ex.: Cadeira plástica branca com braço">
         <div class="grade2">
-          <div><label for="iSis">Cód. do produto no sistema <span class="obrig">*</span></label><input id="iSis" type="text"></div>
-          <div><label for="iPat">Cód. de patrimônio <span class="obrig">*</span></label><input id="iPat" type="text" autocapitalize="characters"></div>
+          <div><label for="iSis">Cód. do produto no sistema <span data-ob="ob_codigo_sistema"></span></label><input id="iSis" type="text"></div>
+          <div><label for="iPat">Cód. de patrimônio <span data-ob="ob_codigo_patrimonio"></span></label><input id="iPat" type="text" autocapitalize="characters"></div>
         </div>
-        <label>Categoria <span class="obrig">*</span> <span class="opc">— o + cria uma nova</span></label><div id="iCat"></div>
-        <label>Foto do bem <span class="opc">(opcional — câmera ou galeria)</span></label><div id="iFoto"></div>
+        <label>Categoria <span data-ob="ob_categoria"></span> <span class="opc">— o + cria uma nova</span></label><div id="iCat"></div>
+        <label>Foto do bem <span data-ob="ob_foto"></span> <span class="opc">— câmera ou galeria</span></label><div id="iFoto"></div>
       </div>
-
       <div id="blExistente">
         <div class="form-tit">Qual bem</div>
         <div id="iBem" style="margin-top:8px"></div>
         <p class="dica" id="iBemInfo"></p>
       </div>
-
       <div class="form-tit">Aquisição</div>
       <div class="grade2">
         <div><label for="iQtd">Quantidade (unidades) <span class="obrig">*</span></label><input id="iQtd" type="number" min="1" inputmode="numeric"></div>
@@ -55,15 +64,14 @@ iniciar(async () => {
       <label>Local onde vai ficar <span class="obrig">*</span> <span class="opc">— o + cria um local novo</span></label><div id="iLocal"></div>
       <label>Estado de conservação <span class="obrig">*</span></label>
       <div class="opcoes" id="iEstado" style="grid-template-columns:repeat(3,1fr)">${ESTADOS.map((e) => `<label class="opcao" data-estado="${e}"><input type="radio" name="estado" value="${e}">${ESTADO_NOME[e]}</label>`).join("")}</div>
-
       <label class="check"><input type="checkbox" id="iSemNf"> Bem antigo sem nota fiscal</label>
       <div id="blComNf">
         <div class="grade2">
-          <div><label for="iForn">Fornecedor <span class="obrig">*</span></label><input id="iForn" type="text"></div>
-          <div><label for="iValor">Valor unitário (R$) <span class="obrig">*</span></label><input id="iValor" type="text" inputmode="decimal" placeholder="0,00"></div>
-          <div class="cheio"><label for="iNfNum">Nº da nota fiscal <span class="opc">(opcional)</span></label><input id="iNfNum" type="text" inputmode="numeric" placeholder="Ex.: 001234"></div>
+          <div><label for="iForn">Fornecedor <span data-ob="ob_fornecedor"></span></label><input id="iForn" type="text"></div>
+          <div><label for="iValor">Valor unitário (R$) <span data-ob="ob_valor"></span></label><input id="iValor" type="text" inputmode="decimal" placeholder="0,00"></div>
+          <div class="cheio"><label for="iNfNum">Nº da nota fiscal <span data-ob="ob_nf_numero"></span></label><input id="iNfNum" type="text" inputmode="numeric" placeholder="Ex.: 001234"></div>
         </div>
-        <label>Nota fiscal <span class="obrig">*</span> <span class="opc">(PDF ou foto)</span></label><div id="iNf"></div>
+        <label>Nota fiscal <span data-ob="ob_nf_anexo"></span> <span class="opc">(PDF ou foto)</span></label><div id="iNf"></div>
       </div>
       <div id="blSemNf" hidden>
         <label for="iSemNfObs">Por que não tem nota? <span class="obrig">*</span></label><input id="iSemNfObs" type="text" placeholder="Ex.: comprado em 2019, nota não encontrada">
@@ -73,40 +81,91 @@ iniciar(async () => {
         </div>
       </div>
       <div class="grade2">
-        <div><label for="iGar">Garantia do fornecedor até <span class="opc">(opcional)</span></label><input id="iGar" type="date"></div>
-        <div><label for="iVida">Prazo de vida em anos <span class="opc">(opcional)</span></label><input id="iVida" type="text" inputmode="decimal" placeholder="Ex.: 5"></div>
+        <div><label for="iGar">Garantia do fornecedor até <span data-ob="ob_garantia"></span></label><input id="iGar" type="date"></div>
+        <div><label for="iVida">Prazo de vida em anos <span data-ob="ob_vida_util"></span></label><input id="iVida" type="text" inputmode="decimal" placeholder="Ex.: 5"></div>
       </div>
       <label for="iObs">Observação <span class="opc">(opcional)</span></label><textarea id="iObs" rows="2"></textarea>
       <div class="erro" id="iErro"></div>
       <button class="bt-mar bt-grande" type="submit" id="iOk">Incluir</button>
       <button class="bt-cinza bt-grande" type="button" id="iGuardar" style="margin-top:10px">Salvar para concluir depois</button>
-      <p class="dica" style="text-align:center">Falta alguma informação? Guarde como inclusão em aberto: nada entra no saldo até você concluir.</p>
+      <p class="dica" style="text-align:center">Falta alguma informação? Guarde em Pendentes: nada entra no saldo até você concluir.</p>
+    </form>
+
+    <!-- ===================== por nota fiscal ===================== -->
+    <form id="fNota" novalidate hidden>
+      <div class="form-tit">Nota fiscal (preenchida uma vez)</div>
+      <label for="nChave">Chave de acesso <span data-ob="ob_nf_chave"></span> <span class="opc">— 44 números; preenche CNPJ, nº e mês sozinho</span></label>
+      <input id="nChave" type="text" inputmode="numeric" placeholder="0000 0000 0000 …">
+      <div id="nChaveInfo"></div>
+      <div class="grade2">
+        <div><label for="nForn">Fornecedor <span data-ob="ob_fornecedor"></span></label><input id="nForn" type="text"></div>
+        <div><label for="nNum">Nº da nota fiscal <span data-ob="ob_nf_numero"></span></label><input id="nNum" type="text" inputmode="numeric"></div>
+        <div><label for="nData">Data de aquisição <span class="obrig">*</span></label><input id="nData" type="date"></div>
+        <div><label>Anexo da nota <span data-ob="ob_nf_anexo"></span> <span class="opc">(PDF ou foto)</span></label><div id="nNf"></div></div>
+      </div>
+      <label class="check"><input type="checkbox" id="nSemNf"> Sem nota fiscal (bens antigos)</label>
+      <div id="nSemNfBox" hidden><label for="nSemNfObs">Por que não tem nota? <span class="obrig">*</span></label><input id="nSemNfObs" type="text"></div>
+
+      <div class="form-tit">Padrões para os itens <span class="opc" style="text-transform:none;letter-spacing:0">— cada item pode mudar</span></div>
+      <div class="grade2">
+        <div><label>Local <span class="obrig">*</span></label><div id="nLocal"></div></div>
+        <div><label>Estado <span class="obrig">*</span></label><select id="nEstado">${ESTADOS.map((e) => `<option value="${e}">${ESTADO_NOME[e]}</option>`).join("")}</select></div>
+        <div><label for="nGar">Garantia até <span data-ob="ob_garantia"></span></label><input id="nGar" type="date"></div>
+        <div><label for="nVida">Prazo de vida (anos) <span data-ob="ob_vida_util"></span></label><input id="nVida" type="text" inputmode="decimal" placeholder="Ex.: 5"></div>
+      </div>
+
+      <div class="form-tit">Itens da nota <span id="nCont" style="text-transform:none;letter-spacing:0;font-weight:600">(0)</span></div>
+      <div id="nItens"></div>
+      <div class="acoes" style="margin-top:12px"><button type="button" class="bt-mar" id="btAddItem">+ Adicionar item</button><button type="button" class="bt-cinza" id="btDup" hidden>Duplicar último</button></div>
+
+      <div class="total-nota" id="nTotal" hidden></div>
+      <div class="erro" id="nErro"></div>
+      <button class="bt-verde bt-grande" type="submit" id="nOk">Salvar nota e itens</button>
+      <button class="bt-cinza bt-grande" type="button" id="nGuardar" style="margin-top:10px">Salvar nota para concluir depois</button>
+      <p class="dica" style="text-align:center">Nada entra no saldo até você salvar a nota. Se um item falhar, nenhum entra.</p>
     </form>`;
-  $("#iData").max = BASE.hoje;
+  marcarObrigatorios();
+  $("#iData").max = BASE.hoje; $("#nData").max = BASE.hoje;
+  if (BASE.config?.permitir_data_futura) { $("#iData").removeAttribute("max"); $("#nData").removeAttribute("max"); }
   montarCampos();
   $$("[data-modo]").forEach((o) => o.onclick = () => modo(o.dataset.modo));
   $$("[data-estado]").forEach((o) => o.onclick = () => marcarEstado(o.dataset.estado));
   $("#iSemNf").onchange = semNf;
   $("#f").onsubmit = enviar;
   $("#iGuardar").onclick = guardar;
+  $("#btPend").onclick = () => $("#pendentes").classList.toggle("aberto");
+  // nota
+  mascaraChave($("#nChave"));
+  $("#nChave").addEventListener("input", lerChave);
+  $("#nSemNf").onchange = () => { $("#nSemNfBox").hidden = !$("#nSemNf").checked; };
+  $("#btAddItem").onclick = () => escolherTipoItem();
+  $("#btDup").onclick = duplicarUltimo;
+  $("#fNota").onsubmit = lancarNota;
+  $("#nGuardar").onclick = guardarNota;
   await limparForm(param("bem"));
-  await listarAbertas();
+  await listarPendentes();
 });
 
+// ------------------------------------------------------------ comum ---
 function montarCampos() {
   cat = campoCategoria($("#iCat"));
   foto = campoArquivo($("#iFoto"), { texto: "Tirar ou escolher foto" });
   nf = campoArquivo($("#iNf"), { tipo: "nf", texto: "Anexar PDF ou foto da nota" });
   local = campoLocal($("#iLocal"));
+  nLocal = campoLocal($("#nLocal"));
+  nNf = campoArquivo($("#nNf"), { tipo: "nf", texto: "Anexar PDF ou foto da nota" });
 }
 function marcarEstado(e) { $$("[data-estado]").forEach((x) => { x.classList.toggle("on", x.dataset.estado === e); $("input", x).checked = x.dataset.estado === e; }); }
 function semNf() { $("#blComNf").hidden = $("#iSemNf").checked; $("#blSemNf").hidden = !$("#iSemNf").checked; }
 function modo(m) {
   MODO = m;
   $$("[data-modo]").forEach((x) => x.classList.toggle("on", x.dataset.modo === m));
+  $("#f").hidden = m === "nota";
+  $("#fNota").hidden = m !== "nota";
   $("#blNovo").hidden = m !== "novo";
   $("#blExistente").hidden = m !== "existente";
   $("#iOk").textContent = RASC ? "Concluir inclusão" : m === "novo" ? "Cadastrar e incluir" : "Incluir quantidade";
+  $("#nOk").textContent = NOTA ? "Concluir e salvar nota" : "Salvar nota e itens";
 }
 async function escolherBem(bemId) {
   await campoBem($("#iBem"), (b) => {
@@ -115,7 +174,7 @@ async function escolherBem(bemId) {
   }, { bemId });
 }
 
-// Todos os campos do formulário, do jeito que estão (vai para o rascunho e para o envio)
+// ----------------------------------------------- bem novo / existente ---
 function coletar() {
   const v = (id) => $(id).value;
   return {
@@ -127,14 +186,16 @@ function coletar() {
   };
 }
 async function limparForm(bemId = null) {
-  RASC = null; BEM = null;
-  $("#f").reset();
-  $("#iData").value = BASE.hoje;
+  RASC = null; BEM = null; NOTA = null; ITENS = [];
+  $("#f").reset(); $("#fNota").reset();
+  $("#iData").value = BASE.hoje; $("#nData").value = BASE.hoje;
   $("#continuando").hidden = true;
+  $("#nChaveInfo").innerHTML = ""; $("#nSemNfBox").hidden = true;
   montarCampos();
   marcarEstado("novo"); semNf();
+  desenharItens();
   await escolherBem(bemId);
-  modo(bemId ? "existente" : "novo");
+  modo(bemId ? "existente" : MODO === "nota" ? "nota" : "novo");
 }
 async function continuar(r) {
   await limparForm();
@@ -154,49 +215,57 @@ async function continuar(r) {
   nf.existente(r.nf_url, "Nota fiscal já guardada");
   if (r.modo === "existente") await escolherBem(r.bem_id);
   modo(r.modo);
-  $("#continuando").hidden = false;
-  $("#continuando").innerHTML = `Continuando a inclusão em aberto de <b>${esc(r.bem?.descricao || d.descricao || "")}</b>, guardada por ${esc(r.atualizado_por || r.criado_por)} em ${fmtDataHora(r.atualizado_em)}. <button class="bt-link" type="button" id="btSairRasc" style="padding:0">começar outra do zero</button>`;
-  $("#btSairRasc").onclick = () => limparForm();
+  aviso(`Continuando o cadastro em aberto de <b>${esc(r.bem?.descricao || d.descricao || "")}</b>, guardado por ${esc(r.atualizado_por || r.criado_por)} em ${fmtDataHora(r.atualizado_em)}.`);
   $("#f").scrollIntoView({ behavior: "smooth" });
 }
-
-async function listarAbertas() {
-  try { RASCUNHOS = (await api("/rascunhos")).rascunhos; } catch { RASCUNHOS = []; }
-  const box = $("#abertas");
-  if (!RASCUNHOS.length) { box.innerHTML = ""; return; }
-  box.innerHTML = `<div class="alerta-lista amb" style="margin-bottom:16px"><h3>Inclusões em aberto (${RASCUNHOS.length})</h3>
-    ${RASCUNHOS.map((r) => {
-      const d = r.dados || {};
-      const falta = [];
-      if (r.modo === "novo") { if (!d.codigo_sistema) falta.push("cód. sistema"); if (!d.codigo_patrimonio) falta.push("patrimônio"); if (!d.categoria_id) falta.push("categoria"); }
-      if (!d.quantidade) falta.push("quantidade"); if (!d.local_id) falta.push("local");
-      if (!d.sem_nf) { if (!d.fornecedor) falta.push("fornecedor"); if (!d.valor_unitario) falta.push("valor"); if (!r.nf_path) falta.push("nota fiscal"); }
-      return `<div class="linha"><div class="txt"><div class="tit">${esc(r.modo === "existente" ? (r.bem?.descricao || "Bem") + " · mais unidades" : d.descricao)}${d.quantidade ? " · " + esc(d.quantidade) + " un." : ""}</div>
-        <div class="sub">Guardada por ${esc(r.atualizado_por || r.criado_por)} em ${fmtDataHora(r.atualizado_em)}${falta.length ? ` · falta: ${falta.join(", ")}` : " · pronta para concluir"}</div></div>
-        <button class="bt-mini bt-mar" data-cont="${r.id}">Continuar</button><button class="bt-x" data-exc="${r.id}" title="Excluir" aria-label="Excluir">×</button></div>`;
-    }).join("")}</div>`;
-  $$("[data-cont]").forEach((b) => b.onclick = () => continuar(RASCUNHOS.find((r) => r.id === b.dataset.cont)));
-  $$("[data-exc]").forEach((b) => b.onclick = async () => {
-    const r = RASCUNHOS.find((x) => x.id === b.dataset.exc);
-    if (!(await confirmar(`Excluir a inclusão em aberto de <b>${esc(r.bem?.descricao || r.dados?.descricao || "")}</b>? O que foi guardado (inclusive foto e nota) se perde.`, "Excluir inclusão em aberto", "Excluir"))) return;
-    try { await api(`/rascunhos/${r.id}/excluir`, { body: {} }); if (RASC?.id === r.id) await limparForm(); toast("Excluída."); listarAbertas(); }
-    catch (e) { toast(e.message, true); }
-  });
+function aviso(html) {
+  $("#continuando").hidden = false;
+  $("#continuando").innerHTML = html + ` <button class="bt-link" type="button" id="btSairRasc" style="padding:0">começar outro do zero</button>`;
+  $("#btSairRasc").onclick = () => limparForm();
+  $("#pendentes").classList.remove("aberto");
 }
 
+// ----------------------------------------------------------- pendentes ---
+async function listarPendentes() {
+  try { [RASCUNHOS, NOTAS] = await Promise.all([api("/rascunhos").then((r) => r.rascunhos), api("/notas").then((r) => r.notas)]); } catch { RASCUNHOS = []; NOTAS = []; }
+  const box = $("#pendentes"), total = RASCUNHOS.length + NOTAS.length;
+  box.hidden = !total;
+  if (!total) { box.classList.remove("aberto"); return; }
+  $("#nPend").textContent = total;
+  const faltaDe = (r) => {
+    const d = r.dados || {}, f = [];
+    if (r.modo === "novo") { if (!d.codigo_sistema && ob("ob_codigo_sistema")) f.push("cód. sistema"); if (!d.codigo_patrimonio && ob("ob_codigo_patrimonio")) f.push("patrimônio"); if (!d.categoria_id && ob("ob_categoria")) f.push("categoria"); }
+    if (!d.quantidade) f.push("quantidade"); if (!d.local_id) f.push("local");
+    if (!d.sem_nf) { if (!d.fornecedor && ob("ob_fornecedor")) f.push("fornecedor"); if (!d.valor_unitario && ob("ob_valor")) f.push("valor"); if (!r.nf_path && ob("ob_nf_anexo")) f.push("nota fiscal"); }
+    return f;
+  };
+  $("#listaPend").innerHTML = `
+    ${NOTAS.length ? `<div class="bloco-tit">Notas em aberto (${NOTAS.length})</div>` + NOTAS.map((n) => { const c = n.cabecalho || {}; const its = n.itens || []; return `<div class="linha"><div class="txt"><div class="tit">${esc(c.fornecedor || "Fornecedor não informado")}${c.nf_numero ? " · NF " + esc(c.nf_numero) : ""}</div><div class="sub">${its.length} ite${its.length === 1 ? "m" : "ns"} · guardada por ${esc(n.atualizado_por || n.criado_por)} em ${fmtDataHora(n.atualizado_em)}${n.nf_path ? " · com anexo" : ""}</div></div><button class="bt-mini bt-mar" data-nota="${n.id}">Continuar</button><button class="bt-x" data-exc-nota="${n.id}" title="Excluir" aria-label="Excluir">×</button></div>`; }).join("") : ""}
+    ${RASCUNHOS.length ? `<div class="bloco-tit">Cadastros em aberto (${RASCUNHOS.length})</div>` + RASCUNHOS.map((r) => { const d = r.dados || {}, f = faltaDe(r); return `<div class="linha"><div class="txt"><div class="tit">${esc(r.modo === "existente" ? (r.bem?.descricao || "Bem") + " · mais unidades" : d.descricao)}${d.quantidade ? " · " + esc(d.quantidade) + " un." : ""}</div><div class="sub">Guardado por ${esc(r.atualizado_por || r.criado_por)} em ${fmtDataHora(r.atualizado_em)}${f.length ? ` · falta: ${f.join(", ")}` : " · pronto para concluir"}</div></div><button class="bt-mini bt-mar" data-cont="${r.id}">Continuar</button><button class="bt-x" data-exc="${r.id}" title="Excluir" aria-label="Excluir">×</button></div>`; }).join("") : ""}`;
+  $$("[data-cont]").forEach((b) => b.onclick = () => continuar(RASCUNHOS.find((r) => r.id === b.dataset.cont)));
+  $$("[data-nota]").forEach((b) => b.onclick = () => continuarNota(NOTAS.find((n) => n.id === b.dataset.nota)));
+  $$("[data-exc]").forEach((b) => b.onclick = async () => {
+    const r = RASCUNHOS.find((x) => x.id === b.dataset.exc);
+    if (!(await confirmar(`Excluir o cadastro em aberto de <b>${esc(r.bem?.descricao || r.dados?.descricao || "")}</b>? O que foi guardado (inclusive foto e nota) se perde.`, "Excluir cadastro em aberto", "Excluir"))) return;
+    try { await api(`/rascunhos/${r.id}/excluir`, { body: {} }); if (RASC?.id === r.id) await limparForm(); toast("Excluído."); listarPendentes(); } catch (e) { toast(e.message, true); }
+  });
+  $$("[data-exc-nota]").forEach((b) => b.onclick = async () => {
+    const n = NOTAS.find((x) => x.id === b.dataset.excNota);
+    if (!(await confirmar(`Excluir a nota em aberto de <b>${esc(n.cabecalho?.fornecedor || "")}</b> com ${(n.itens || []).length} item(ns)? O anexo também se perde.`, "Excluir nota em aberto", "Excluir"))) return;
+    try { await api(`/notas/${n.id}/excluir`, { body: {} }); if (NOTA?.id === n.id) await limparForm(); toast("Excluída."); listarPendentes(); } catch (e) { toast(e.message, true); }
+  });
+}
 async function guardar() {
   $("#iErro").textContent = "";
   const bt = $("#iGuardar"); bt.disabled = true; bt.textContent = "Guardando…";
   try {
-    const r = await api("/rascunhos", { body: { id: RASC?.id, modo: MODO, bem_id: BEM?.id, dados: coletar(), foto: MODO === "novo" ? foto.valor() : null, nf: $("#iSemNf").checked ? null : nf.valor() } });
-    toast("Guardada em inclusões em aberto. Nada entrou no saldo ainda.");
-    await limparForm();
-    await listarAbertas();
+    await api("/rascunhos", { body: { id: RASC?.id, modo: MODO, bem_id: BEM?.id, dados: coletar(), foto: MODO === "novo" ? foto.valor() : null, nf: $("#iSemNf").checked ? null : nf.valor() } });
+    toast("Guardado em Pendentes. Nada entrou no saldo ainda.");
+    await limparForm(); await listarPendentes();
     window.scrollTo({ top: 0, behavior: "smooth" });
   } catch (er) { $("#iErro").textContent = er.message; }
   bt.disabled = false; bt.textContent = "Salvar para concluir depois";
 }
-
 async function enviar(e) {
   e.preventDefault();
   $("#iErro").textContent = "";
@@ -219,6 +288,158 @@ async function enviar(e) {
       <a class="bt-mar bt-grande" style="display:block;text-decoration:none;margin-top:16px" href="bem.html?id=${r.bem_id}">Ver a ficha do bem</a>
       <a class="link" href="incluir.html" style="display:inline-block">Incluir outro</a></div>`;
   } catch (er) { $("#iErro").textContent = er.message; bt.disabled = false; bt.textContent = txt; }
+}
+
+// ------------------------------------------------------- nota fiscal ---
+function lerChave() {
+  const r = lerChaveNfe($("#nChave").value);
+  const info = $("#nChaveInfo");
+  if (!r) { info.innerHTML = ""; return; }
+  if (r.erro) { info.innerHTML = `<div class="chave-aviso">${esc(r.erro)}</div>`; return; }
+  if (!$("#nNum").value) $("#nNum").value = r.numero;
+  if (!$("#nForn").value) $("#nForn").value = "CNPJ " + r.cnpj_fmt;
+  if (!$("#nData").value || $("#nData").value === BASE.hoje) $("#nData").value = r.ano_mes + "-01";
+  info.innerHTML = `<div class="${r.valida ? "chave-ok" : "chave-aviso"}">${r.valida ? "✓" : "⚠"} CNPJ ${esc(r.cnpj_fmt)} · nota nº ${esc(r.numero)} · série ${esc(r.serie)} · emissão ${r.ano_mes.slice(5)}/${r.ano_mes.slice(0, 4)}${r.valida ? "" : " · dígito verificador não confere: confira a chave"}. Complete o nome do fornecedor e o dia da data.</div>`;
+}
+function cabecalho() {
+  const v = (id) => $(id).value;
+  return { fornecedor: v("#nForn"), nf_numero: v("#nNum"), nf_chave: v("#nChave"), data_aquisicao: v("#nData"), sem_nf: $("#nSemNf").checked, sem_nf_obs: v("#nSemNfObs"), local_id: nLocal.value, estado: v("#nEstado"), garantia_ate: v("#nGar"), vida_util_anos: v("#nVida") };
+}
+function novoItem(modoItem, bem = null) {
+  return { uid: Math.random().toString(36).slice(2), modo: modoItem, bem_id: bem?.id || null, bem_nome: bem?.descricao || "", bem_pat: bem?.codigo_patrimonio || "", descricao: "", codigo_sistema: "", codigo_patrimonio: "", categoria_id: "", foto: null, foto_path: null, quantidade: "", valor_unitario: "", local_id: "", estado: "", garantia_ate: "", vida_util_anos: "", obs: "" };
+}
+function escolherTipoItem() {
+  modal(`<h2>Adicionar item da nota</h2><p class="msg">O item é um bem novo ou um bem que já está cadastrado?</p>
+    <div class="opcoes"><button type="button" class="opcao" id="tiNovo">Bem novo</button><button type="button" class="opcao" id="tiEx">Já cadastrado</button></div>
+    <div id="tiBem" style="margin-top:12px" hidden></div>
+    <div class="acoes"><button class="bt-link" data-fechar>Cancelar</button></div>`, (d) => {
+    $("#tiNovo", d).onclick = () => { ITENS.push(novoItem("novo")); desenharItens(); d.close(); focarUltimo(); };
+    $("#tiEx", d).onclick = async () => {
+      $("#tiBem", d).hidden = false; $("#tiEx", d).classList.add("on");
+      await campoBem($("#tiBem", d), (b) => { if (b) { ITENS.push(novoItem("existente", b)); desenharItens(); d.close(); focarUltimo(); } });
+      $("input", $("#tiBem", d)).focus();
+    };
+  });
+}
+function focarUltimo() { const cards = $$("#nItens .item-nota"); const c = cards[cards.length - 1]; if (c) { c.scrollIntoView({ behavior: "smooth", block: "center" }); const i = $("input", c); if (i) i.focus(); } }
+function duplicarUltimo() {
+  if (!ITENS.length) return;
+  const u = ITENS[ITENS.length - 1];
+  ITENS.push({ ...u, uid: Math.random().toString(36).slice(2), descricao: u.modo === "novo" ? u.descricao : "", codigo_patrimonio: "", foto: null, foto_path: null });
+  desenharItens(); focarUltimo();
+}
+function desenharItens() {
+  $("#nCont").textContent = `(${ITENS.length})`;
+  $("#btDup").hidden = !ITENS.length;
+  const box = $("#nItens");
+  box.innerHTML = ITENS.length ? ITENS.map((it, i) => `
+    <div class="item-nota" data-uid="${it.uid}">
+      <button type="button" class="bt-x fechar" data-tirar="${it.uid}" aria-label="Tirar item">×</button>
+      <div class="cab"><b>Item ${i + 1}</b> ${it.modo === "novo" ? `<span class="pill novo">Bem novo</span>` : `<span class="pill bom">Já cadastrado</span>`}</div>
+      ${it.modo === "novo" ? `
+        <label>Descrição <span class="obrig">*</span></label><input type="text" data-c="descricao" value="${esc(it.descricao)}" placeholder="Ex.: Mesa inox 2 m">
+        <div class="grade2">
+          <div><label>Cód. sistema <span data-ob="ob_codigo_sistema"></span></label><input type="text" data-c="codigo_sistema" value="${esc(it.codigo_sistema)}"></div>
+          <div><label>Patrimônio <span data-ob="ob_codigo_patrimonio"></span></label><input type="text" data-c="codigo_patrimonio" autocapitalize="characters" value="${esc(it.codigo_patrimonio)}"></div>
+        </div>
+        <label>Categoria <span data-ob="ob_categoria"></span></label><div data-cat></div>
+        <p class="dica"><button type="button" class="bt-link" data-trocar="${it.uid}" style="padding:0;font-size:13px">Esse bem já está cadastrado? trocar para "já cadastrado"</button></p>`
+      : `<div class="bem-escolhido" style="margin-top:8px"><div class="txt"><div class="tit">${esc(it.bem_nome)}</div><div class="sub">Patrim. ${esc(it.bem_pat || "—")}</div></div><button type="button" class="bt-link" data-trocar-bem="${it.uid}">trocar</button></div>`}
+      <div class="grade2">
+        <div><label>Quantidade <span class="obrig">*</span></label><input type="number" min="1" inputmode="numeric" data-c="quantidade" value="${esc(it.quantidade)}"></div>
+        <div><label>Valor unitário (R$) <span data-ob="ob_valor"></span></label><input type="text" inputmode="decimal" data-c="valor_unitario" value="${esc(it.valor_unitario)}" placeholder="0,00"></div>
+      </div>
+      <details ${it.local_id || it.estado || it.garantia_ate || it.vida_util_anos || it.foto ? "open" : ""}>
+        <summary>Local, estado, garantia, prazo de vida e foto deste item <span class="herdado">— em branco = <b>padrão da nota</b></span></summary>
+        <div class="grade2">
+          <div><label>Local</label><div data-local></div></div>
+          <div><label>Estado</label><select data-c="estado"><option value="">padrão da nota</option>${ESTADOS.map((e) => `<option value="${e}" ${it.estado === e ? "selected" : ""}>${ESTADO_NOME[e]}</option>`).join("")}</select></div>
+          <div><label>Garantia até</label><input type="date" data-c="garantia_ate" value="${esc(it.garantia_ate)}"></div>
+          <div><label>Prazo de vida (anos)</label><input type="text" inputmode="decimal" data-c="vida_util_anos" value="${esc(it.vida_util_anos)}" placeholder="padrão da nota"></div>
+          ${it.modo === "novo" ? `<div class="cheio"><label>Foto do bem <span data-ob="ob_foto"></span></label><div data-foto></div></div>` : ""}
+          <div class="cheio"><label>Observação</label><input type="text" data-c="obs" value="${esc(it.obs)}"></div>
+        </div>
+      </details>
+    </div>`).join("") : `<div class="caixa msg">Nenhum item ainda. Clique em "+ Adicionar item".</div>`;
+  marcarObrigatorios(box);
+  $$("#nItens .item-nota").forEach((card) => {
+    const it = ITENS.find((x) => x.uid === card.dataset.uid);
+    $$("[data-c]", card).forEach((inp) => inp.addEventListener("input", () => { it[inp.dataset.c] = inp.value; if (inp.dataset.c === "quantidade" || inp.dataset.c === "valor_unitario") totalNota(); }));
+    const dc = $("[data-cat]", card); if (dc) { const sel = campoCategoria(dc, it.categoria_id); sel.addEventListener("change", () => it.categoria_id = sel.value); }
+    const dl = $("[data-local]", card); if (dl) { const sel = campoLocal(dl, { valor: it.local_id, vazio: "padrão da nota" }); sel.addEventListener("change", () => it.local_id = sel.value); }
+    const df = $("[data-foto]", card); if (df) { const f = campoArquivo(df, { texto: "Tirar ou escolher foto" }); it._foto = f; if (it.foto_url) f.existente(it.foto_url, "Foto já guardada"); }
+    $("[data-tirar]", card).onclick = () => { ITENS = ITENS.filter((x) => x.uid !== it.uid); desenharItens(); };
+    const tr = $("[data-trocar]", card); if (tr) tr.onclick = () => modal(`<h2>Trocar para bem já cadastrado</h2><p class="msg">Escolha o bem. A quantidade e o valor digitados ficam.</p><div id="trBem"></div><div class="acoes"><button class="bt-link" data-fechar>Cancelar</button></div>`, (d) => {
+      campoBem($("#trBem", d), (b) => { if (b) { Object.assign(it, { modo: "existente", bem_id: b.id, bem_nome: b.descricao, bem_pat: b.codigo_patrimonio }); desenharItens(); d.close(); } });
+    });
+    const trb = $("[data-trocar-bem]", card); if (trb) trb.onclick = () => modal(`<h2>Trocar o bem</h2><div id="trBem"></div><div class="acoes"><button class="bt-cinza" id="trNovo">Virar "bem novo"</button><button class="bt-link" data-fechar>Cancelar</button></div>`, (d) => {
+      campoBem($("#trBem", d), (b) => { if (b) { Object.assign(it, { bem_id: b.id, bem_nome: b.descricao, bem_pat: b.codigo_patrimonio }); desenharItens(); d.close(); } });
+      $("#trNovo", d).onclick = () => { Object.assign(it, { modo: "novo", bem_id: null, descricao: it.bem_nome }); desenharItens(); d.close(); };
+    });
+  });
+  totalNota();
+}
+function totalNota() {
+  const num = (v) => { const n = Number(String(v || "").replace(/\./g, "").replace(",", ".")); return Number.isFinite(n) ? n : 0; };
+  const un = ITENS.reduce((a, i) => a + (parseInt(i.quantidade) || 0), 0);
+  const tot = ITENS.reduce((a, i) => a + (parseInt(i.quantidade) || 0) * num(i.valor_unitario), 0);
+  const box = $("#nTotal");
+  box.hidden = !ITENS.length;
+  box.innerHTML = `<div><span style="font-size:13px;color:var(--cinza)">Total calculado dos itens</span><br><b>${moeda(tot)}</b><span style="font-size:13px;color:var(--cinza)"> · ${un} unidade${un === 1 ? "" : "s"} · confira com o valor da nota</span></div>`;
+}
+function itensParaEnviar() {
+  return ITENS.map((it) => ({ modo: it.modo, bem_id: it.bem_id, descricao: it.descricao, codigo_sistema: it.codigo_sistema, codigo_patrimonio: it.codigo_patrimonio, categoria_id: it.categoria_id,
+    quantidade: it.quantidade, valor_unitario: it.valor_unitario, local_id: it.local_id, estado: it.estado, garantia_ate: it.garantia_ate, vida_util_anos: it.vida_util_anos, obs: it.obs,
+    foto: it._foto ? it._foto.valor() : null, foto_path: it.foto_path || null }));
+}
+async function guardarNota() {
+  $("#nErro").textContent = "";
+  const bt = $("#nGuardar"); bt.disabled = true; bt.textContent = "Guardando…";
+  try {
+    // fotos dos itens novos vão junto como dados (tamanho limitado): guardamos só a nota e os campos
+    const r = await api("/notas", { body: { id: NOTA?.id, cabecalho: cabecalho(), itens: itensParaEnviar().map((i) => ({ ...i, foto: null })), nf: $("#nSemNf").checked ? null : nNf.valor() } });
+    toast("Nota guardada em Pendentes. Nada entrou no saldo ainda.");
+    await limparForm(); MODO = "nota"; modo("nota"); await listarPendentes();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  } catch (er) { $("#nErro").textContent = er.message; }
+  bt.disabled = false; bt.textContent = "Salvar nota para concluir depois";
+}
+async function continuarNota(n) {
+  await limparForm();
+  NOTA = n;
+  const c = n.cabecalho || {};
+  const put = (id, val) => { if (val !== undefined && val !== null) $(id).value = val; };
+  put("#nForn", c.fornecedor); put("#nNum", c.nf_numero); put("#nChave", c.nf_chave); put("#nData", c.data_aquisicao || BASE.hoje);
+  put("#nEstado", c.estado || "novo"); put("#nGar", c.garantia_ate); put("#nVida", c.vida_util_anos);
+  $("#nSemNf").checked = !!c.sem_nf; $("#nSemNfBox").hidden = !c.sem_nf; put("#nSemNfObs", c.sem_nf_obs);
+  if ($("#nChave").value) { $("#nChave").dispatchEvent(new Event("input")); }
+  nLocal = campoLocal($("#nLocal"), { valor: c.local_id || "" });
+  nNf.existente(n.nf_url, "Nota fiscal já guardada");
+  ITENS = (n.itens || []).map((i) => ({ ...novoItem(i.modo || "novo"), ...i, uid: Math.random().toString(36).slice(2) }));
+  // nome dos bens já cadastrados
+  const dados = await carregarBens();
+  for (const it of ITENS) if (it.modo === "existente" && it.bem_id) { const b = dados.bens.find((x) => x.id === it.bem_id); if (b) { it.bem_nome = b.descricao; it.bem_pat = b.codigo_patrimonio; } }
+  MODO = "nota"; modo("nota"); desenharItens();
+  aviso(`Continuando a nota em aberto de <b>${esc(c.fornecedor || "fornecedor não informado")}</b>${c.nf_numero ? " (NF " + esc(c.nf_numero) + ")" : ""}, guardada por ${esc(n.atualizado_por || n.criado_por)} em ${fmtDataHora(n.atualizado_em)}.`);
+  $("#fNota").scrollIntoView({ behavior: "smooth" });
+}
+async function lancarNota(e) {
+  e.preventDefault();
+  $("#nErro").textContent = "";
+  if (!ITENS.length) { $("#nErro").textContent = "Adicione pelo menos um item."; return; }
+  const bt = $("#nOk"); bt.disabled = true; const txt = bt.textContent; bt.textContent = "Salvando…";
+  try {
+    const r = await api("/notas/lancar", { body: { nota_id: NOTA?.id || null, cabecalho: cabecalho(), itens: itensParaEnviar(), nf: $("#nSemNf").checked ? null : nNf.valor() } });
+    _bensCache = null;
+    const c = cabecalho();
+    $("main").innerHTML = `<div class="resultado ok"><div class="ic">✓</div><h2>Nota ${c.nf_numero ? esc(c.nf_numero) + " " : ""}lançada</h2>
+      <p>${r.itens.length} ite${r.itens.length === 1 ? "m" : "ns"} de ${esc(c.fornecedor || "")} entraram no imobilizado. Cada item virou uma aquisição ligada à nota.</p>
+      <div class="aq" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;margin-top:14px;text-align:left">
+        ${r.itens.map((x, i) => { const it = ITENS[i]; return `<a href="bem.html?id=${x.bem_id}" style="border:1px solid var(--linha);border-radius:10px;padding:10px 12px;text-decoration:none;color:inherit;background:var(--branco)"><b style="display:block;font-size:14px">${esc(it.modo === "novo" ? it.descricao : it.bem_nome)}</b><small style="color:var(--cinza);display:block">+${esc(it.quantidade)} · aquisição nº ${x.numero}</small></a>`; }).join("")}
+      </div>
+      <a class="bt-mar bt-grande" style="display:block;text-decoration:none;margin-top:16px" href="incluir.html?modo=nota">Lançar outra nota</a>
+      <a class="link" href="bens.html" style="display:inline-block">Consulta geral</a></div>`;
+  } catch (er) { $("#nErro").textContent = er.message; bt.disabled = false; bt.textContent = txt; $("#nErro").scrollIntoView({ behavior: "smooth", block: "center" }); }
 }
 </script>
 </body>

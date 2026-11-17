@@ -79,6 +79,24 @@ async function api(rota, opts = {}) {
   return dados;
 }
 const pode = (...perfis) => BASE && (BASE.usuario.perfil === "admin" || perfis.includes(BASE.usuario.perfil));
+// Campo obrigatório? (configuração do ADM; padrão obrigatório)
+const ob = (k) => !BASE || !BASE.config || BASE.config[k] !== false;
+// Marca "*" ou "(opcional)" conforme a configuração. uso: <label>Fornecedor <span data-ob="ob_fornecedor"></span></label>
+function marcarObrigatorios(root = document) {
+  $$("[data-ob]", root).forEach((el) => { el.innerHTML = ob(el.dataset.ob) ? '<span class="obrig">*</span>' : '<span class="opc">(opcional)</span>'; });
+}
+// Lê a chave de acesso da NF-e (44 dígitos): CNPJ, número, série e mês de emissão. Devolve null se vazia.
+function lerChaveNfe(v) {
+  const c = String(v || "").replace(/\D/g, "");
+  if (!c) return null;
+  if (c.length !== 44) return { erro: "A chave de acesso tem 44 números (" + c.length + " digitados)." };
+  let soma = 0, peso = 2;
+  for (let i = 42; i >= 0; i--) { soma += Number(c[i]) * peso; peso = peso === 9 ? 2 : peso + 1; }
+  const r = soma % 11, dv = r < 2 ? 0 : 11 - r;
+  const cnpj = c.slice(6, 20);
+  return { chave: c, cnpj, cnpj_fmt: cnpj.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5"), numero: String(Number(c.slice(25, 34))), serie: String(Number(c.slice(22, 25))), ano_mes: "20" + c.slice(2, 4) + "-" + c.slice(4, 6), valida: dv === Number(c[43]) };
+}
+function mascaraChave(input) { input.addEventListener("input", () => { input.value = input.value.replace(/\D/g, "").slice(0, 44).replace(/(\d{4})(?=\d)/g, "$1 "); }); }
 const ehAdmin = () => BASE && BASE.usuario.perfil === "admin";
 
 // ------------------------------------------------------- login e senha ---

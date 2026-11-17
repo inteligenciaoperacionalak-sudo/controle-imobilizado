@@ -229,3 +229,36 @@ dialog.modal h2{font-size:20px;margin-bottom:6px}
 .resultado .bt-grande{margin-top:16px}
 .resultado.ok{border-color:var(--verde)}
 .nota{background:var(--ambar-claro);border:1px solid var(--ambar);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:14px}
+
+/* pendentes recolhidos + nota com itens + configurações */
+.pendentes{margin-bottom:14px}
+.pendentes > button{width:100%;display:flex;align-items:center;gap:10px;background:var(--ambar-claro);border:1px solid var(--ambar);color:var(--ambar-texto);font-weight:800;text-align:left;padding:12px 14px;border-radius:10px}
+.pendentes > button .n{background:var(--ambar);color:var(--tinta);border-radius:99px;padding:2px 10px;font-size:13px}
+.pendentes > button .seta{margin-left:auto;transition:transform .2s}
+.pendentes.aberto > button .seta{transform:rotate(180deg)}
+.pendentes .lista{display:none;background:var(--branco);border:1px solid var(--linha);border-top:none;border-radius:0 0 10px 10px;padding:4px 14px}
+.pendentes.aberto > button{border-radius:10px 10px 0 0}
+.pendentes.aberto .lista{display:block}
+.item-nota{background:var(--branco);border:1px solid var(--linha);border-radius:12px;padding:12px 14px;margin-top:10px;position:relative}
+.item-nota .cab{display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap;padding-right:30px}
+.item-nota .cab b{font-size:16px}
+.item-nota .fechar{position:absolute;right:8px;top:6px}
+.item-nota .herdado{font-size:12px;color:var(--cinza)}
+.item-nota .herdado b{font-weight:700;color:var(--ambar-texto)}
+.item-nota details{margin-top:8px}
+.item-nota summary{font-size:13px;font-weight:700;color:var(--mar);cursor:pointer}
+.total-nota{display:flex;justify-content:space-between;align-items:center;gap:10px;background:var(--branco);border:1px solid var(--linha);border-radius:12px;padding:14px 16px;margin-top:16px;flex-wrap:wrap}
+.total-nota b{font-size:22px}
+.chave-ok{font-size:13px;color:var(--verde-escuro);margin-top:6px}
+.chave-aviso{font-size:13px;color:var(--ambar-texto);margin-top:6px}
+.cfg-grupo{margin-top:18px}
+.cfg{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-top:1px solid var(--linha)}
+.cfg:first-of-type{border-top:none}
+.cfg .txt{flex:1}
+.cfg .tit{font-weight:700;font-size:15px}
+.cfg .sub{font-size:13px;color:var(--cinza)}
+.chave{position:relative;width:52px;height:30px;flex:none;border-radius:99px;background:var(--cinza-claro);border:1px solid var(--linha);cursor:pointer;padding:0}
+.chave::after{content:'';position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:#fff;border:1px solid var(--linha);transition:left .15s}
+.chave.on{background:var(--verde);border-color:var(--verde)}
+.chave.on::after{left:25px}
+.chave span{position:absolute;left:-9999px}

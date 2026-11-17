@@ -20,7 +20,7 @@ const PERFIL_DESC = {
   conferente: "Gera, conta e lança conferências",
   consulta: "Só vê",
 };
-const ACAO = { login: "Entrou no sistema", trocar_senha: "Trocou a senha", criar_local: "Criou local", editar_local: "Editou local", criar_categoria: "Criou categoria", editar_categoria: "Editou categoria", abrir_conferencia: "Abriu conferência", lancar_conferencia: "Lançou conferência", cancelar_conferencia: "Cancelou conferência", criar_usuario: "Criou usuário", editar_usuario: "Editou usuário" };
+const ACAO = { editar_config: "Alterou configurações", criar_nota_pendente: "Guardou nota em aberto", editar_nota_pendente: "Atualizou nota em aberto", excluir_nota_pendente: "Excluiu nota em aberto", lancar_nota: "Lançou nota fiscal", criar_rascunho: "Guardou cadastro em aberto", editar_rascunho: "Atualizou cadastro em aberto", excluir_rascunho: "Excluiu cadastro em aberto", login: "Entrou no sistema", trocar_senha: "Trocou a senha", criar_local: "Criou local", editar_local: "Editou local", criar_categoria: "Criou categoria", editar_categoria: "Editou categoria", abrir_conferencia: "Abriu conferência", lancar_conferencia: "Lançou conferência", cancelar_conferencia: "Cancelou conferência", criar_usuario: "Criou usuário", editar_usuario: "Editou usuário" };
 let ABA = "usuarios", U = [];
 
 iniciar(() => desenhar(), { perfis: [] });
@@ -28,12 +28,46 @@ iniciar(() => desenhar(), { perfis: [] });
 async function desenhar() {
   $("main").innerHTML = `
     <div class="titulo"><div><h2>Administração</h2><p>Usuários e acessos, locais e categorias, e o registro de tudo o que foi feito.</p></div></div>
-    <div class="abas">${[["usuarios", "Usuários"], ["cadastros", "Locais e categorias"], ["registro", "Registro geral"]].map(([k, v]) => `<button class="aba ${ABA === k ? "on" : ""}" data-aba="${k}">${v}</button>`).join("")}</div>
+    <div class="abas">${[["usuarios", "Usuários"], ["cadastros", "Locais e categorias"], ["config", "Configurações"], ["registro", "Registro geral"]].map(([k, v]) => `<button class="aba ${ABA === k ? "on" : ""}" data-aba="${k}">${v}</button>`).join("")}</div>
     <div id="conteudo"><p class="msg">Carregando…</p></div>`;
   $$("[data-aba]").forEach((b) => b.onclick = () => { ABA = b.dataset.aba; desenhar(); });
   if (ABA === "usuarios") await usuarios();
   if (ABA === "cadastros") cadastros();
+  if (ABA === "config") await configuracoes();
   if (ABA === "registro") await registro();
+}
+
+// ---------------------------------------------------------- configurações ---
+const CFG_GRUPOS = [
+  ["Cadastro e aquisição — o que é obrigatório", [
+    ["ob_codigo_sistema", "Código do produto no sistema"], ["ob_codigo_patrimonio", "Código de patrimônio"], ["ob_categoria", "Categoria"], ["ob_foto", "Foto do bem"],
+    ["ob_fornecedor", "Fornecedor"], ["ob_valor", "Valor unitário"], ["ob_nf_numero", "Nº da nota fiscal"], ["ob_nf_anexo", "Anexo da nota fiscal (PDF ou foto)"], ["ob_nf_chave", "Chave de acesso da nota"],
+    ["ob_garantia", "Garantia do fornecedor"], ["ob_vida_util", "Prazo de vida"]]],
+  ["Movimentações — o que é obrigatório", [
+    ["ob_telefone", "Telefone (empréstimo e manutenção)"], ["ob_liberado_por", "Liberado por (nome completo)"], ["ob_assinatura_emprestimo", "Assinatura no empréstimo"], ["ob_assinatura_manutencao", "Assinatura na manutenção"],
+    ["ob_foto_baixa", "Foto no pedido de baixa"], ["ob_levado_por", "Quem levou (transferência)"]]],
+  ["Regras", [
+    ["baixa_precisa_validacao", "Baixa precisa da validação do ADM", "Desligado: a baixa é aprovada na hora por quem pediu"],
+    ["patrimonio_unico", "Patrimônio não pode se repetir entre bens"],
+    ["permitir_data_futura", "Permitir data de aquisição no futuro"]]],
+];
+const SEMPRE = "Descrição, quantidade, local, estado e data de aquisição são sempre obrigatórios: sem eles o bem não existe no saldo.";
+async function configuracoes() {
+  const r = await api("/config");
+  let cfg = { ...r.config };
+  $("#conteudo").innerHTML = `
+    <p class="msg">O que o ADM marcar aqui vale na tela e no sistema, para todas as formas de incluir e para as movimentações. ${SEMPRE}${r.atualizado_por ? ` Última alteração por ${esc(r.atualizado_por)} em ${fmtDataHora(r.atualizado_em)}.` : ""}</p>
+    ${CFG_GRUPOS.map(([tit, itens]) => `<div class="caixa cfg-grupo"><h3 style="margin-top:0">${tit}</h3>${itens.map(([k, nome, sub]) => `<div class="cfg"><div class="txt"><div class="tit">${nome}</div><div class="sub">${sub || (k.startsWith("ob_") ? (cfg[k] !== false ? "Obrigatório" : "Opcional") : (cfg[k] !== false ? "Ligado" : "Desligado"))}</div></div><button type="button" class="chave ${cfg[k] !== false ? "on" : ""}" data-k="${k}" role="switch" aria-checked="${cfg[k] !== false}"><span>${nome}</span></button></div>`).join("")}</div>`).join("")}
+    <div class="erro" id="cfgErro"></div>
+    <div class="acoes"><button class="bt-mar" id="cfgSalvar">Salvar configurações</button><button class="bt-cinza" id="cfgPadrao">Voltar ao padrão</button></div>`;
+  const atualizar = () => $$("[data-k]").forEach((b) => { const k = b.dataset.k, on = cfg[k] !== false; b.classList.toggle("on", on); b.setAttribute("aria-checked", on); const sub = b.closest(".cfg").querySelector(".sub"); const def = CFG_GRUPOS.flatMap((g) => g[1]).find((x) => x[0] === k)[2]; sub.textContent = def || (k.startsWith("ob_") ? (on ? "Obrigatório" : "Opcional") : (on ? "Ligado" : "Desligado")); });
+  $$("[data-k]").forEach((b) => b.onclick = () => { cfg[b.dataset.k] = cfg[b.dataset.k] === false; atualizar(); });
+  $("#cfgPadrao").onclick = () => { cfg = { ...r.padrao }; atualizar(); };
+  $("#cfgSalvar").onclick = async () => {
+    $("#cfgErro").textContent = "";
+    try { const s = await api("/config", { body: cfg }); BASE.config = s.config; toast(s.nada ? "Nada mudou." : "Configurações salvas."); configuracoes(); }
+    catch (e) { $("#cfgErro").textContent = e.message; }
+  };
 }
 
 function formUsuario(u = null) {
@@ -82,7 +116,7 @@ async function atividade(u) {
 }
 function logHtml(lg) {
   if (!lg.length) return `<div class="vazio"><b>Nada registrado.</b></div>`;
-  return `<div class="hist-mov">${lg.map((l) => { const d = l.detalhes || {}; const extra = d.nome || d.local || (d.depois ? JSON.stringify(d.depois).replace(/[{}"]/g, "").replace(/,/g, ", ") : "") || (d.numero ? "nº " + d.numero : "") || d.motivo || ""; return `<div class="linha"><div class="quando">${fmtDataHora(l.quando)}<br>${esc(l.usuario)}</div><div class="txt">${esc(ACAO[l.acao] || l.acao)}${extra ? " · " + esc(extra) : ""}${d.motivo && extra !== d.motivo ? " · " + esc(d.motivo) : ""}</div></div>`; }).join("")}</div>`;
+  return `<div class="hist-mov">${lg.map((l) => { const d = l.detalhes || {}; const extra = d.nome || d.local || d.descricao || (d.fornecedor ? d.fornecedor + (d.nf_numero ? " · NF " + d.nf_numero : "") + (d.itens !== undefined ? " · " + d.itens + " item(ns)" : "") : "") || (d.mudou ? Object.entries(d.mudou).map(([k, [a, b]]) => k + ": " + (a ? "sim" : "não") + " → " + (b ? "sim" : "não")).join("; ") : "") || (d.depois ? JSON.stringify(d.depois).replace(/[{}"]/g, "").replace(/,/g, ", ") : "") || (d.numero ? "nº " + d.numero : "") || d.motivo || ""; return `<div class="linha"><div class="quando">${fmtDataHora(l.quando)}<br>${esc(l.usuario)}</div><div class="txt">${esc(ACAO[l.acao] || l.acao)}${extra ? " · " + esc(extra) : ""}${d.motivo && extra !== d.motivo ? " · " + esc(d.motivo) : ""}</div></div>`; }).join("")}</div>`;
 }
 
 function cadastros() {

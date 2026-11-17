@@ -80,10 +80,11 @@ async function carregar() {
           <div><span>Fornecedor</span>${esc(e.fornecedor || "—")}</div>
           <div><span>Valor unitário</span>${moeda(e.valor_unitario) || "—"}</div>
           <div><span>Valor total</span>${e.valor_unitario !== null ? moeda(e.valor_unitario * e.quantidade) : "—"}</div>
-          <div><span>Nota fiscal</span>${e.nf_numero ? "nº " + esc(e.nf_numero) + " · " : ""}${e.nf_url ? `<a href="${esc(e.nf_url)}" target="_blank" rel="noopener">Abrir nota</a>` : `<span class="pill pendente" style="display:inline-block">sem nota fiscal</span>`}</div>
+          <div><span>Nota fiscal</span>${e.nf_numero ? "nº " + esc(e.nf_numero) + " · " : ""}${e.nf_url ? `<a href="${esc(e.nf_url)}" target="_blank" rel="noopener">Abrir nota</a>` : e.sem_nf ? `<span class="pill pendente" style="display:inline-block">sem nota fiscal</span>` : "sem anexo"}${e.nf_chave ? `<div class="msg" style="margin:2px 0 0;font-size:11px;overflow-wrap:anywhere">chave ${esc(e.nf_chave)}</div>` : ""}</div>
           <div><span>Garantia até</span>${e.garantia_ate ? fmtData(e.garantia_ate) + (e.garantia_ate < BASE.hoje ? " (vencida)" : "") : "—"}</div>
           <div><span>Prazo de vida</span>${e.vida_util_anos ? `${String(e.vida_util_anos).replace(".", ",")} ano(s) · até ${fmtData(vidaAte(e))}` : "—"}</div>
         </div>
+        ${e.mesma_nota && e.mesma_nota.length ? `<p class="msg" style="margin-top:8px">Mesma nota: ${e.mesma_nota.map((m) => `<a href="bem.html?id=${m.bem_id}">${esc(m.descricao)}</a> (${m.quantidade})`).join(", ")}</p>` : ""}
         ${e.obs ? `<p class="msg" style="margin-top:8px">${esc(e.obs)}</p>` : ""}
         <p class="msg" style="margin-top:6px;font-size:12px">Lançado por ${esc(e.criado_por)} em ${fmtDataHora(e.criado_em)}${e.atualizado_em ? ` · editado por ${esc(e.atualizado_por)} em ${fmtDataHora(e.atualizado_em)}` : ""}</p>
         ${ehAdmin() ? `<button class="bt-mini bt-cinza nao-imprimir" data-editar-entrada="${e.id}">Editar dados da aquisição</button>` : ""}

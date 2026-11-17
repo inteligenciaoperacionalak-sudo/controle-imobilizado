@@ -27,11 +27,12 @@ iniciar(async () => {
         <div><label for="tQtd">Quantidade <span class="obrig">*</span></label><input id="tQtd" type="number" min="1" inputmode="numeric"></div>
       </div>
       <label>Para onde vai <span class="obrig">*</span></label><div id="tPara"></div>
-      <label for="tLevou">Quem levou <span class="obrig">*</span></label><input id="tLevou" type="text">
+      <label for="tLevou">Quem levou <span data-ob="ob_levado_por"></span></label><input id="tLevou" type="text">
       <label for="tObs">Observação</label><textarea id="tObs" rows="2"></textarea>
       <div class="erro" id="tErro"></div>
       <button class="bt-mar bt-grande" type="submit" id="tOk">Transferir</button>
     </form>`;
+  marcarObrigatorios();
   destino = campoLocal($("#tPara"), { vazio: "Escolha o destino" });
   await campoBem($("#tBem"), (b) => {
     BEM = b;
